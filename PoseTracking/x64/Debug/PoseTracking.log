@@ -1,0 +1,53 @@
+﻿  orbDetector.cpp
+e:\study\slambook\posetracking\posetracking\orbdetector.h(90): warning C4244: “return”: 从“double”转换到“float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(296): warning C4244: “=”: 从“double”转换到“float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(317): warning C4244: “初始化”: 从“double”转换到“float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(327): warning C4244: “=”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(355): warning C4244: “初始化”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(356): warning C4244: “初始化”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(363): warning C4244: “=”: 从“double”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(371): warning C4267: “=”: 从“size_t”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(554): warning C4244: “参数”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(598): warning C4244: “初始化”: 从“int”转换到“float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(598): warning C4244: “初始化”: 从“int”转换到“const float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(599): warning C4244: “初始化”: 从“int”转换到“float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(599): warning C4244: “初始化”: 从“int”转换到“const float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(602): warning C4244: “初始化”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(602): warning C4244: “初始化”: 从“float”转换到“const int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(603): warning C4244: “初始化”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(603): warning C4244: “初始化”: 从“float”转换到“const int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(605): warning C4244: “初始化”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(605): warning C4244: “初始化”: 从“float”转换到“const int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(606): warning C4244: “初始化”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(606): warning C4244: “初始化”: 从“float”转换到“const int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(612): warning C4244: “初始化”: 从“int”转换到“float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(612): warning C4244: “初始化”: 从“int”转换到“const float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(622): warning C4244: “=”: 从“const int”转换到“float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(628): warning C4244: “初始化”: 从“int”转换到“float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(628): warning C4244: “初始化”: 从“int”转换到“const float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(638): warning C4244: “=”: 从“const int”转换到“float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(644): warning C4244: “参数”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(644): warning C4244: “参数”: 从“const float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(653): warning C4244: “参数”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(653): warning C4244: “参数”: 从“const float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(692): warning C4244: “初始化”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(692): warning C4244: “初始化”: 从“float”转换到“const int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(695): warning C4267: “初始化”: 从“size_t”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(695): warning C4267: “初始化”: 从“size_t”转换到“const int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(705): warning C4244: “=”: 从“const int”转换到“float”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(806): warning C4244: “初始化”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(806): warning C4244: “初始化”: 从“float”转换到“const int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(807): warning C4244: “初始化”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(807): warning C4244: “初始化”: 从“float”转换到“const int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(889): warning C4244: “初始化”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(912): warning C4244: “参数”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(913): warning C4244: “参数”: 从“float”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(933): warning C4244: “参数”: 从“float”转换到“const unsigned __int64”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(960): warning C4267: “初始化”: 从“size_t”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(1080): warning C4267: “=”: 从“size_t”转换到“int”，可能丢失数据
+e:\study\slambook\posetracking\posetracking\orbdetector.cpp(1093): warning C4267: “初始化”: 从“size_t”转换到“int”，可能丢失数据
+d:\vs2017\vs2017install\vc\tools\msvc\14.10.25017\include\utility(217): warning C4267: “初始化”: 从“size_t”转换到“int”，可能丢失数据
+  e:\study\slambook\posetracking\posetracking\orbdetector.cpp(1007): note: 参见对正在编译的函数 模板 实例化“std::pair<int,PoseTracking::DetectorNode *>::pair<unsigned __int64,PoseTracking::DetectorNode*,void,0>(std::pair<unsigned __int64,PoseTracking::DetectorNode *> &&) noexcept”的引用
+  e:\study\slambook\posetracking\posetracking\orbdetector.cpp(1007): note: 参见对正在编译的函数 模板 实例化“std::pair<int,PoseTracking::DetectorNode *>::pair<unsigned __int64,PoseTracking::DetectorNode*,void,0>(std::pair<unsigned __int64,PoseTracking::DetectorNode *> &&) noexcept”的引用
+  PoseTracking.vcxproj -> E:\study\slambook\PoseTracking\x64\Debug\PoseTracking.exe
+  PoseTracking.vcxproj -> E:\study\slambook\PoseTracking\x64\Debug\PoseTracking.pdb (Partial PDB)
