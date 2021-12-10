@@ -131,7 +131,10 @@ namespace PoseTracking
 				return;
 			}
 
-
+			// Step 3 在mInitialFrame与mCurrentFrame中找匹配的特征点对
+			ORBmatcher matcher(
+				0.9,        //最佳的和次佳特征点评分的比值阈值，这里是比较宽松的，跟踪时一般是0.7
+				true);      //检查特征点的方向
 
 
 

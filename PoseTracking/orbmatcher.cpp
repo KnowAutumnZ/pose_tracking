@@ -56,6 +56,29 @@ namespace PoseTracking
 			cv::KeyPoint kp1 = F1.mvKeys[i1];
 			int level1 = kp1.octave;
 
+			// vbPrevMatched 输入的是参考帧 F1的特征点
+			// windowSize = 100，输入最大最小金字塔层级 均为0
+			std::vector<size_t> vIndices2 = GetFeaturesInArea(F2, F1.mvKeys[i1].pt.x, F1.mvKeys[i1].pt.y, windowSize, level1 - 1, level1 + 1);
+
+			// 没有候选特征点，跳过
+			if (vIndices2.empty())
+				continue;
+
+			// 取出参考帧F1中当前遍历特征点对应的描述子
+			cv::Mat d1 = F1.mDescriptors.row(i1);
+
+			int bestDist = INT_MAX;     //最佳描述子匹配距离，越小越好
+			int bestDist2 = INT_MAX;    //次佳描述子匹配距离
+			int bestIdx2 = -1;          //最佳候选特征点在F2中的index
+
+
+
+
+
+
+
+
+
 
 
 		}
@@ -88,10 +111,56 @@ namespace PoseTracking
 		// 保证nMinCellX 结果大于等于0
 		const int nMinCellX = std::max(0, (int)floor((x - F.mnMinX - r)*F.mfGridElementWidthInv));
 
+		// 如果最终求得的圆的左边界所在的网格列超过了设定了上限，那么就说明计算出错，找不到符合要求的特征点，返回空vector
+		if (nMinCellX >= FRAME_GRID_COLS)
+			return vIndices;
 
+		// 计算圆所在的右边界网格列索引
+		const int nMaxCellX = std::min((int)FRAME_GRID_COLS - 1, (int)ceil((x - F.mnMinX + r)*F.mfGridElementWidthInv));
+		// 如果计算出的圆右边界所在的网格不合法，说明该特征点不好，直接返回空vector
+		if (nMaxCellX < 0)
+			return vIndices;
 
+		//后面的操作也都是类似的，计算出这个圆上下边界所在的网格行的id
+		const int nMinCellY = std::max(0, (int)floor((y - F.mnMinY - r)*F.mfGridElementHeightInv));
+		if (nMinCellY >= FRAME_GRID_ROWS)
+			return vIndices;
 
+		const int nMaxCellY = std::min((int)FRAME_GRID_ROWS - 1, (int)ceil((y - F.mnMinY + r)*F.mfGridElementHeightInv));
+		if (nMaxCellY < 0)
+			return vIndices;
 
+		// Step 2 遍历圆形区域内的所有网格，寻找满足条件的候选特征点，并将其index放到输出里
+		for (int ix = nMinCellX; ix <= nMaxCellX; ix++)
+		{
+			for (int iy = nMinCellY; iy <= nMaxCellY; iy++)
+			{
+				// 获取这个网格内的所有特征点在 Frame::mvKeysUn 中的索引
+				const std::vector<size_t> vCell = F.mGrid[ix][iy];
+				// 如果这个网格中没有特征点，那么跳过这个网格继续下一个
+				if (vCell.empty())
+					continue;
+
+				for (size_t i=0; i<vCell.size(); i++)
+				{
+					// 根据索引先读取这个特征点 
+					const cv::KeyPoint &kpUn = F.mvKeys[vCell[i]];
+
+					// 保证特征点是在金字塔层级minLevel和maxLevel之间，不是的话跳过
+					if (kpUn.octave < minLevel || kpUn.octave > maxLevel)
+						continue;
+
+					// 通过检查，计算候选特征点到圆中心的距离，查看是否是在这个圆形区域之内
+					const float distx = kpUn.pt.x - x;
+					const float disty = kpUn.pt.y - y;
+
+					// 如果x方向和y方向的距离都在指定的半径之内，存储其index为候选特征点
+					if (sqrt(distx*distx + disty * distx))
+						vIndices.push_back(vCell[i]);
+				}
+			}
+		}
+		return vIndices;
 	}
 
 }

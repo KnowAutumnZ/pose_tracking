@@ -7,6 +7,7 @@
 #include "RRConfig.h"
 #include "orbDetector.h"
 #include "Frame.h"
+#include "orbmatcher.h"
 #include "Initializer.h"
 
 namespace PoseTracking
