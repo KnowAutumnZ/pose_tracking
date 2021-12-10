@@ -381,7 +381,7 @@ orbDetector::orbDetector(int _nfeatures, float _scaleFactor, int _nlevels, int _
 * @param[in & out] _keypoints                存储特征点关键点的向量
 * @param[in & out] _descriptors              存储特征点描述子的矩阵
 */
-void orbDetector::operator()(const cv::Mat& image_, const cv::Mat& mask_, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors)
+void orbDetector::operator()(const cv::Mat& image_, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors)
 {
 	cv::Mat image = image_.clone();
 	if (image.channels() != 1) cv::cvtColor(image, image, cv::COLOR_BGR2GRAY);
@@ -424,9 +424,9 @@ void orbDetector::operator()(const cv::Mat& image_, const cv::Mat& mask_, std::v
 	for (int level = 0; level < mnlevels; ++level)
 	{
 		//获取在allKeypoints中当前层特征点容器的句柄
-		std::vector<cv::KeyPoint>& keypoints = allKeypoints[level];
+		std::vector<cv::KeyPoint> keypoints_ = allKeypoints[level];
 		//本层的特征点数
-		int nkeypointsLevel = (int)keypoints.size();
+		int nkeypointsLevel = (int)keypoints_.size();
 
 		//如果特征点数目为0，跳出本次循环，继续下一层金字塔
 		if (nkeypointsLevel == 0)
@@ -436,8 +436,8 @@ void orbDetector::operator()(const cv::Mat& image_, const cv::Mat& mask_, std::v
 		cv::Mat desc = descriptors.rowRange(offset, offset + nkeypointsLevel);
 
 		// Step 6 计算高斯模糊后图像的描述子
-		computeDescriptors(desc, 	//高斯模糊之后的图层图像
-			keypoints,         	    //当前图层中的特征点集合
+		computeDescriptors(mvImagePyramid[level], 	//高斯模糊之后的图层图像
+			keypoints_,         	    //当前图层中的特征点集合
 			desc, 		            //存储计算之后的描述子
 			mvpattern);	            //随机采样模板
 								
@@ -452,9 +452,10 @@ void orbDetector::operator()(const cv::Mat& image_, const cv::Mat& mask_, std::v
 			float scale = mvScaleFactor[level];
 			// 遍历本层所有的特征点
 			// 特征点本身直接乘缩放倍数就可以了
-			for (auto& keypoint: keypoints)
+			for (auto& keypoint: keypoints_)
 				keypoint.pt *= scale;
 		}
+		keypoints.insert(keypoints.end(), keypoints_.begin(), keypoints_.end());
 	}
 }
 
@@ -1146,7 +1147,12 @@ std::vector<cv::KeyPoint> orbDetector::DistributeOctTree(const std::vector<cv::K
 					if ((int)lNodes.size() >= N)
 						break;
 				}//遍历vPrevSizeAndPointerToNode并对其中指定的node进行分裂，直到刚刚达到或者超过要求的特征点个数
-
+				
+				//这里理想中应该是一个for循环就能够达成结束条件了，但是作者想的可能是，有些子节点所在的区域会没有特征点，因此很有可能一次for循环之后
+				//的数目还是不能够满足要求，所以还是需要判断结束条件并且再来一次
+				//判断是否达到了停止条件
+				if ((int)lNodes.size() >= N || (int)lNodes.size() == prevSize)
+					bFinish = true;
 			}//一直进行nToExpand累加的节点分裂过程，直到分裂后的nodes数目刚刚达到或者超过要求的特征点数目
 		}//当本次分裂后达不到结束条件但是再进行一次完整的分裂之后就可以达到结束条件时
 	}// 根据兴趣点分布,利用4叉树方法对图像进行划分区域

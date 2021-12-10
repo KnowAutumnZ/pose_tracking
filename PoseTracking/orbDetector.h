@@ -70,7 +70,7 @@ namespace PoseTracking
 		* @param[out] keypoints    保存提取出来的特征点的向量
 		* @param[out] descriptors  输出用的保存特征点描述子的cv::Mat
 		*/
-		void operator()(const cv::Mat& image_, const cv::Mat& mask_, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors);
+		void operator()(const cv::Mat& image_, std::vector<cv::KeyPoint>& keypoints, cv::Mat& descriptors);
 
 		//下面的这些内联函数都是用来直接获取类的成员变量的
 
