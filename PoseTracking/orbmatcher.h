@@ -34,7 +34,7 @@ namespace PoseTracking
 		 */
 		int SearchForInitialization(Frame &F1, Frame &F2, std::vector<int> &vnMatches12, int windowSize = 10);
 
-
+	private:
 		/**
 		 * @brief 找到在 以x,y为中心,半径为r的圆形内且金字塔层级在[minLevel, maxLevel]的特征点
 		 *
@@ -46,7 +46,26 @@ namespace PoseTracking
 		 * @return vector<size_t>           返回搜索到的候选匹配点id
 		 */
 		std::vector<size_t> GetFeaturesInArea(Frame &F, const float &x, const float  &y, const float  &r, const int minLevel = -1, const int maxLevel = -1);
-	private:
+
+		/**
+		 * @brief Computes the Hamming distance between two ORB descriptors 计算地图点和候选投影点的描述子距离
+		 * @param[in] a     一个描述子
+		 * @param[in] b     另外一个描述子
+		 * @return int      描述子的汉明距离
+		 */
+		int DescriptorDistance(const cv::Mat &a, const cv::Mat &b);
+
+		/**
+		 * @brief 筛选出在旋转角度差落在在直方图区间内数量最多的前三个bin的索引
+		 *
+		 * @param[in] histo         匹配特征点对旋转方向差直方图
+		 * @param[in] L             直方图尺寸
+		 * @param[in & out] ind1          bin值第一大对应的索引
+		 * @param[in & out] ind2          bin值第二大对应的索引
+		 * @param[in & out] ind3          bin值第三大对应的索引
+		 */
+		void ComputeThreeMaxima(std::vector<int>* histo, const int L, int &ind1, int &ind2, int &ind3);
+
 
 		float mfNNratio;            //< 最优评分和次优评分的比例
 		bool mbCheckOrientation;    //< 是否检查特征点的方向

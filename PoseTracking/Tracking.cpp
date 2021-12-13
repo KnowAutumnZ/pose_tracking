@@ -136,6 +136,25 @@ namespace PoseTracking
 				0.9,        //最佳的和次佳特征点评分的比值阈值，这里是比较宽松的，跟踪时一般是0.7
 				true);      //检查特征点的方向
 
+			// 对 mInitialFrame,mCurrentFrame 进行特征点匹配
+			// mvbPrevMatched为参考帧的特征点坐标，初始化存储的是mInitialFrame中特征点坐标，匹配后存储的是匹配好的当前帧的特征点坐标
+			// mvIniMatches 保存参考帧F1中特征点是否匹配上，index保存是F1对应特征点索引，值保存的是匹配好的F2特征点索引
+			int nmatches = matcher.SearchForInitialization(
+				mInitialFrame, mCurrentFrame,    //初始化时的参考帧和当前帧
+				mvIniMatches,                    //保存匹配关系
+				20);                             //搜索窗口大小
+
+			// Step 4 验证匹配结果，如果初始化的两帧之间的匹配点太少，重新初始化
+			if (nmatches < 16)
+			{
+				delete mpInitializer;
+				mpInitializer = static_cast<Initializer*>(NULL);
+				return;
+			}
+
+			cv::Mat Rcw; // Current Camera Rotation
+			cv::Mat tcw; // Current Camera Translation
+			std::vector<bool> vbTriangulated; // Triangulated Correspondences (mvIniMatches)
 
 
 
