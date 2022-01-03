@@ -142,11 +142,31 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Frame.cpp" />
+    <ClCompile Include="FrameDrawer.cpp" />
+    <ClCompile Include="Initializer.cpp" />
+    <ClCompile Include="log.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="MapDrawer.cpp" />
     <ClCompile Include="orbDetector.cpp" />
+    <ClCompile Include="orbmatcher.cpp" />
+    <ClCompile Include="RRConfig.cpp" />
+    <ClCompile Include="system.cpp" />
+    <ClCompile Include="Tracking.cpp" />
+    <ClCompile Include="Viewer.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Frame.h" />
+    <ClInclude Include="FrameDrawer.h" />
+    <ClInclude Include="Initializer.h" />
+    <ClInclude Include="log.h" />
+    <ClInclude Include="MapDrawer.h" />
     <ClInclude Include="orbDetector.h" />
+    <ClInclude Include="orbmatcher.h" />
+    <ClInclude Include="RRConfig.h" />
+    <ClInclude Include="system.h" />
+    <ClInclude Include="Tracking.h" />
+    <ClInclude Include="Viewer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
