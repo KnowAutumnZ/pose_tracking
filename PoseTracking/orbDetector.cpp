@@ -359,7 +359,7 @@ orbDetector::orbDetector(int _nfeatures, float _scaleFactor, int _nlevels, int _
 	const double hp2 = HALF_PATCH_SIZE*HALF_PATCH_SIZE;
 
 	//利用圆的方程计算每行像素的u坐标边界（max）
-	for (size_t v = 0; v <= HALF_PATCH_SIZE; ++v)
+	for (size_t v = 0; v <= vmax; ++v)
 		mv_umax[v] = std::round(sqrt(hp2 - v * v));		//结果都是大于0的结果，表示x坐标在这一行的边界
 
 	//这里其实是使用了对称的方式计算上四分之一的圆周上的umax，目的也是为了保持严格的对称（如果按照常规的想法做，由于cvRound就会很容易出现不对称的情况，
@@ -569,7 +569,7 @@ void orbDetector::ComputePyramid(cv::Mat& image)
 }
 
 /**
-* @brief 以八叉树分配特征点的方式，计算图像金字塔中的特征点
+* @brief 以四叉树分配特征点的方式，计算图像金字塔中的特征点
 * @detials 这里两层vector的意思是，第一层存储的是某张图片中的所有特征点，而第二层则是存储图像金字塔中所有图像的vectors of keypoints
 * @param[out] allKeypoints 提取得到的所有特征点
 */
@@ -611,13 +611,14 @@ void orbDetector::ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> 
 		{
 			//计算当前网格初始行坐标
 			const float iniY = minBorderY + i*hCell;
-			//计算当前网格最大的行坐标，即考虑到了多出来3是为了cell边界像素进行FAST特征点提取用
+
+			//计算当前网格最大的行坐标
 			//前面的EDGE_THRESHOLD指的应该是提取后的特征点所在的边界，所以minBorderY是考虑了计算半径时候的图像边界
 			//目测一个图像网格的大小是25*25
-			float maxY = iniY + hCell + 3;
+			float maxY = iniY + hCell;
 
 			//如果初始的行坐标就已经超过了有效的图像边界了，这里的“有效图像”是指原始的、可以提取FAST特征点的图像区域
-			if (iniY >= maxBorderY - 3) break;
+			if (iniY >= maxBorderY) break;
 
 			//如果图像的大小导致不能够正好划分出来整齐的图像网格，那么就要委屈最后一行了
 			if (maxY > maxBorderY) maxY = maxBorderY;
@@ -627,13 +628,13 @@ void orbDetector::ComputeKeyPointsOctTree(std::vector<std::vector<cv::KeyPoint> 
 			{
 				//计算初始的列坐标
 				const float iniX = minBorderX + j*wCell;
-				//计算这列网格的最大列坐标，+6的含义和前面相同
-				float maxX = iniX + wCell + 3;
+				//计算这列网格的最大列坐标
+				float maxX = iniX + wCell;
 
 				//判断坐标是否在图像中
 				//如果初始的列坐标就已经超过了有效的图像边界了，这里的“有效图像”是指原始的、可以提取FAST特征点的图像区域。
-				//并且应该同前面行坐标的边界对应，都为-3
-				if (iniX >= maxBorderX - 3) break;
+				//并且应该同前面行坐标的边界对应
+				if (iniX >= maxBorderX) break;
 
 				//如果最大坐标越界那么委屈一下
 				if (maxX > maxBorderX) maxX = maxBorderX;
@@ -757,7 +758,6 @@ float orbDetector::IC_Angle(const cv::Mat& image, cv::Point2f pt, const std::vec
 		//注意这里的center下标u可以是负的！中心水平线上的像素按x坐标（也就是u坐标）加权
 		m_10 += u * center[u];
 
-	// Go line by line in the circular patch  
 	//这里的step1表示这个图像一行包含的字节总数。参考[https://blog.csdn.net/qianqing13579/article/details/45318279]
 	int step = (int)image.step1();
 	//注意这里是以v=0中心线为对称轴，然后对称地每成对的两行之间进行遍历，这样处理加快了计算速度

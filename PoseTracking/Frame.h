@@ -1,7 +1,10 @@
 #pragma once
 
 #include <opencv2/opencv.hpp>
+
 #include "orbDetector.h"
+#include "MapPoint.h"
+#include "KeyFrame.h"
 
 namespace PoseTracking
 {
@@ -15,6 +18,9 @@ namespace PoseTracking
 	*
 	*/
 	#define FRAME_GRID_COLS 64
+
+	class MapPoint;
+	class KeyFrame;
 
 	class Frame
 	{
@@ -88,6 +94,27 @@ namespace PoseTracking
 		 */
 		bool PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY);
 
+		// Returns the camera center.
+		/**
+		 * @brief 返回位于当前帧位姿时,相机的中心
+		 *
+		 * @return cv::Mat 相机中心在世界坐标系下的3D点坐标
+		 */
+		inline cv::Mat GetCameraCenter()
+		{
+			return mOw.clone();
+		}
+
+		/**
+		 * @brief Get the Rotation Inverse object
+		 * mRwc存储的是从当前相机坐标系到世界坐标系所进行的旋转，而我们一般用的旋转则说的是从世界坐标系到当前相机坐标系的旋转
+		 * @return 返回从当前帧坐标系到世界坐标系的旋转
+		 */
+		inline cv::Mat GetRotationInverse()
+		{
+			return mRwc.clone();
+		}
+
 	public:
 		//帧的时间戳
 		double mTimeStamp;
@@ -98,13 +125,42 @@ namespace PoseTracking
 		//左目摄像头和右目摄像头特征点对应的描述子
 		cv::Mat mDescriptors, mDescriptorsRight;
 
+		// 每个特征点对应的MapPoint.如果特征点没有对应的地图点,那么将存储一个空指针
+		std::vector<MapPoint*> mvpMapPoints;
+
+		// 观测不到Map中的3D点
+		// 属于外点的特征点标记,在 Optimizer::PoseOptimization 使用了
+		std::vector<bool> mvbOutlier;
+
 		cv::Mat mTcw; //< 相机姿态 世界坐标系到相机坐标坐标系的变换矩阵,是我们常规理解中的相机位姿
+
+		// Current and Next Frame id.
+		// 类的静态成员变量，这些变量则是在整个系统开始执行的时候被初始化的——它在全局区被初始化
+		static long unsigned int nNextId; //< Next Frame id.
+		long unsigned int mnId; //< Current Frame id.
+
+		// 普通帧与自己共视程度最高的关键帧作为参考关键帧
+		KeyFrame* mpReferenceKF;
 
 		// Rotation, translation and camera center
 		cv::Mat mRcw; //< Rotation from world to camera
 		cv::Mat mtcw; //< Translation from world to camera
 		cv::Mat mRwc; //< Rotation from camera to world
 		cv::Mat mOw;  //< mtwc,Translation from camera to world
+
+		/**
+		* @name 图像金字塔信息
+		* @{
+		*/
+		// Scale pyramid info.
+		int mnScaleLevels;                  ///<图像金字塔的层数
+		float mfScaleFactor;                ///<图像金字塔的尺度因子
+		float mfLogScaleFactor;             ///<图像金字塔的尺度因子的对数值，用于仿照特征点尺度预测地图点的尺度
+
+		std::vector<float> mvScaleFactors;		///<图像金字塔每一层的缩放因子
+		std::vector<float> mvInvScaleFactors;	///<以及上面的这个变量的倒数
+		std::vector<float> mvLevelSigma2;		///@todo 目前在frame.c中没有用到，无法下定论
+		std::vector<float> mvInvLevelSigma2;	///<上面变量的倒数
 
 		//畸变校正后的图像边界
 		float mnMinX, mnMinY, mnMaxX, mnMaxY;

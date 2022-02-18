@@ -236,7 +236,7 @@ namespace PoseTracking
 					const float disty = kpUn.pt.y - y;
 
 					// 如果x方向和y方向的距离都在指定的半径之内，存储其index为候选特征点
-					if (sqrt(distx*distx + disty * distx))
+					if (fabs(distx) < r && fabs(disty) < r)
 						vIndices.push_back(vCell[i]);
 				}
 			}

@@ -16,6 +16,14 @@ namespace PoseTracking
 		ORBmatcher(float nnratio = 0.6, bool checkOri = true);
 
 		/**
+		 * @brief Computes the Hamming distance between two ORB descriptors 计算地图点和候选投影点的描述子距离
+		 * @param[in] a     一个描述子
+		 * @param[in] b     另外一个描述子
+		 * @return int      描述子的汉明距离
+		 */
+		static int DescriptorDistance(const cv::Mat &a, const cv::Mat &b);
+
+		/**
 		 * @brief 单目初始化中用于参考帧和当前帧的特征点匹配
 		 * 步骤
 		 * Step 1 构建旋转直方图
@@ -48,14 +56,6 @@ namespace PoseTracking
 		std::vector<size_t> GetFeaturesInArea(Frame &F, const float &x, const float  &y, const float  &r, const int minLevel = -1, const int maxLevel = -1);
 
 		/**
-		 * @brief Computes the Hamming distance between two ORB descriptors 计算地图点和候选投影点的描述子距离
-		 * @param[in] a     一个描述子
-		 * @param[in] b     另外一个描述子
-		 * @return int      描述子的汉明距离
-		 */
-		int DescriptorDistance(const cv::Mat &a, const cv::Mat &b);
-
-		/**
 		 * @brief 筛选出在旋转角度差落在在直方图区间内数量最多的前三个bin的索引
 		 *
 		 * @param[in] histo         匹配特征点对旋转方向差直方图
@@ -65,7 +65,6 @@ namespace PoseTracking
 		 * @param[in & out] ind3          bin值第三大对应的索引
 		 */
 		void ComputeThreeMaxima(std::vector<int>* histo, const int L, int &ind1, int &ind2, int &ind3);
-
 
 		float mfNNratio;            //< 最优评分和次优评分的比例
 		bool mbCheckOrientation;    //< 是否检查特征点的方向

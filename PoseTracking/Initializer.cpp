@@ -119,13 +119,43 @@ namespace PoseTracking
 		//这两个变量用于标记在H和F的计算中哪些特征点对被认为是Inlier
 		std::vector<bool> vbMatchesInliersH, vbMatchesInliersF;
 		//计算出来的单应矩阵和基础矩阵的RANSAC评分，这里其实是采用重投影误差来计算的
-		float SH, SF; //score for H and F
+		float SH, SF;
 		//这两个是经过RANSAC算法后计算出来的单应矩阵和基础矩阵
 		cv::Mat H, F;
 
+		// 构造线程来计算H矩阵及其得分
+		// thread方法比较特殊，在传递引用的时候，外层需要用ref来进行引用传递，否则就是浅拷贝
+		std::thread threadH(&Initializer::FindHomography,	//该线程的主函数
+			this,											//由于主函数为类的成员函数，所以第一个参数就应该是当前对象的this指针
+			std::ref(vbMatchesInliersH), 					//输出，特征点对的Inlier标记
+			std::ref(SH), 									//输出，计算的单应矩阵的RANSAC评分
+			std::ref(H));									//输出，计算的单应矩阵结果
+		// 计算fundamental matrix并打分，参数定义和H是一样的，这里不再赘述
+		std::thread threadF(&Initializer::FindFundamental, this, std::ref(vbMatchesInliersF), std::ref(SF), std::ref(F));
+		//等待两个计算线程结束
+		threadH.join();
+		threadF.join();
 
+		// Step 4 计算得分比例来判断选取哪个模型来求位姿R,t
+		//通过这个规则来判断谁的评分占比更多一些，注意不是简单的比较绝对评分大小，而是看评分的占比
+		float RH = SH / (SH + SF);			//RH=Ratio of Homography
 
+		// 注意这里更倾向于用H矩阵恢复位姿。如果单应矩阵的评分占比达到了0.4以上,则从单应矩阵恢复运动,否则从基础矩阵恢复运动
+		if (RH > 0.5)
+			return ReconstructH(vbMatchesInliersH,	//输入，匹配成功的特征点对Inliers标记
+				H,					//输入，前面RANSAC计算后的单应矩阵
+				mK,					//输入，相机的内参数矩阵
+				R21, t21,			//输出，计算出来的相机从参考帧1到当前帧2所发生的旋转和位移变换
+				vP3D,				//特征点对经过三角测量之后的空间坐标，也就是地图点
+				vbTriangulated,		//特征点对是否成功三角化的标记
+				1.0,				//这个对应的形参为minParallax，即认为某对特征点的三角化测量中，认为其测量有效时
+									//需要满足的最小视差角（如果视差角过小则会引起非常大的观测误差）,单位是角度
+				20);				//为了进行运动恢复，所需要的最少的三角化测量成功的点个数
+		else
+			return ReconstructF(vbMatchesInliersF, F, mK, R21, t21, vP3D, vbTriangulated, 1.0, 20);
 
+		//一般地程序不应该执行到这里，如果执行到这里说明程序跑飞了
+		return false;
 	}
 
 	/**
@@ -258,11 +288,58 @@ namespace PoseTracking
 		// ! 注意这里取的是归一化矩阵T2的转置,因为基础矩阵的定义和单应矩阵不同，两者去归一化的计算也不相同
 		cv::Mat T2t = T2.t();
 
+		//最优结果
+		score = 0.0;
+		vbMatchesInliers = std::vector<bool>(N, false);
 
+		// Iteration variables
+		// 某次迭代中，参考帧的特征点坐标
+		std::vector<cv::Point2f> vPn1i(20);
+		// 某次迭代中，当前帧的特征点坐标
+		std::vector<cv::Point2f> vPn2i(20);
+		// 某次迭代中，计算的基础矩阵
+		cv::Mat F21i;
 
+		// 每次RANSAC记录的Inliers与得分
+		std::vector<bool> vbCurrentInliers(N, false);
+		float currentScore;
 
+		// 下面进行每次的RANSAC迭代
+		for (int it = 0; it < mMaxIterations; it++)
+		{
+			// Select a minimum set
+			// Step 2 选择8个归一化之后的点对进行迭代
+			for (int j = 0; j < 20; j++)
+			{
+				int idx = mvSets[it][j];
 
+				// vPn1i和vPn2i为匹配的特征点对的归一化后的坐标
+				// 首先根据这个特征点对的索引信息分别找到两个特征点在各自图像特征点向量中的索引，然后读取其归一化之后的特征点坐标
+				vPn1i[j] = vPn1[mvMatches12[idx].first];        //first存储在参考帧1中的特征点索引
+				vPn2i[j] = vPn2[mvMatches12[idx].second];       //second存储在参考帧1中的特征点索引
+			}
 
+			// Step 3 八点法计算基础矩阵
+			cv::Mat Fn = ComputeF21(vPn1i, vPn2i);
+
+			// 基础矩阵约束：p2^t*F21*p1 = 0，其中p1,p2 为齐次化特征点坐标    
+			// 特征点归一化：vPn1 = T1 * mvKeys1, vPn2 = T2 * mvKeys2  
+			// 根据基础矩阵约束得到:(T2 * mvKeys2)^t* Hn * T1 * mvKeys1 = 0   
+			// 进一步得到:mvKeys2^t * T2^t * Hn * T1 * mvKeys1 = 0
+			F21i = T2t * Fn*T1;
+
+			// Step 4 利用重投影误差为当次RANSAC的结果评分
+			currentScore = CheckFundamental(F21i, vbCurrentInliers, mSigma);
+
+			// Step 5 更新具有最优评分的基础矩阵计算结果,并且保存所对应的特征点对的内点标记
+			if (currentScore > score)
+			{
+				//如果当前的结果得分更高，那么就更新最优计算结果
+				F21 = F21i.clone();
+				vbMatchesInliers = vbCurrentInliers;
+				score = currentScore;
+			}
+		}
 
 	}
 
@@ -346,6 +423,67 @@ namespace PoseTracking
 		// 注意前面说的是右奇异值矩阵的最后一列，但是在这里因为是vt，转置后了，所以是行；由于A有9列数据，故最后一列的下标为8
 		return vt.row(8).reshape(0, 			//转换后的通道数，这里设置为0表示是与前面相同
 			3); 								//转换后的行数,对应V的最后一列
+	}
+
+	/**
+	 * @brief 根据特征点匹配求fundamental matrix（normalized 8点法）
+	 * 注意F矩阵有秩为2的约束，所以需要两次SVD分解
+	 *
+	 * @param[in] vP1           参考帧中归一化后的特征点
+	 * @param[in] vP2           当前帧中归一化后的特征点
+	 * @return cv::Mat          最后计算得到的基础矩阵F
+	 */
+	cv::Mat Initializer::ComputeF21(
+		const std::vector<cv::Point2f> &vP1, //归一化后的点, in reference frame
+		const std::vector<cv::Point2f> &vP2) //归一化后的点, in current frame
+	{
+		// 原理详见附件推导
+		// x'Fx = 0 整理可得：Af = 0
+		// A = | x'x x'y x' y'x y'y y' x y 1 |, f = | f1 f2 f3 f4 f5 f6 f7 f8 f9 |
+		// 通过SVD求解Af = 0，A'A最小特征值对应的特征向量即为解
+
+		//获取参与计算的特征点对数
+		const int N = vP1.size();
+
+		//初始化A矩阵
+		cv::Mat A(N, 9, CV_32F); // N*9维
+
+		// 构造矩阵A，将每个特征点添加到矩阵A中的元素
+		for (int i = 0; i < N; i++)
+		{
+			const float u1 = vP1[i].x;
+			const float v1 = vP1[i].y;
+			const float u2 = vP2[i].x;
+			const float v2 = vP2[i].y;
+
+			A.at<float>(i, 0) = u2 * u1;
+			A.at<float>(i, 1) = u2 * v1;
+			A.at<float>(i, 2) = u2;
+			A.at<float>(i, 3) = v2 * u1;
+			A.at<float>(i, 4) = v2 * v1;
+			A.at<float>(i, 5) = v2;
+			A.at<float>(i, 6) = u1;
+			A.at<float>(i, 7) = v1;
+			A.at<float>(i, 8) = 1;
+		}
+
+		//存储奇异值分解结果的变量
+		cv::Mat u, w, vt;
+
+		// 定义输出变量，u是左边的正交矩阵U， w为奇异矩阵，vt中的t表示是右正交矩阵V的转置
+		cv::SVDecomp(A, w, u, vt, cv::SVD::MODIFY_A | cv::SVD::FULL_UV);
+		// 转换成基础矩阵的形式
+		cv::Mat Fpre = vt.row(8).reshape(0, 3); // v的最后一列
+
+		//基础矩阵的秩为2,而我们不敢保证计算得到的这个结果的秩为2,所以需要通过第二次奇异值分解,来强制使其秩为2
+		// 对初步得来的基础矩阵进行第2次奇异值分解
+		cv::SVDecomp(Fpre, w, u, vt, cv::SVD::MODIFY_A | cv::SVD::FULL_UV);
+
+		// 秩2约束，强制将第3个奇异值设置为0
+		w.at<float>(2) = 0;
+
+		// 重新组合好满足秩约束的基础矩阵，作为最终计算结果返回 
+		return  u * cv::Mat::diag(w)*vt;
 	}
 
 	/**
@@ -500,6 +638,854 @@ namespace PoseTracking
 				vbMatchesInliers[i] = false;
 		}
 		return score;
+	}
+
+	/**
+	 * @brief 对给定的Fundamental matrix打分
+	 *
+	 * @param[in] F21                       当前帧和参考帧之间的基础矩阵
+	 * @param[in] vbMatchesInliers          匹配的特征点对属于inliers的标记
+	 * @param[in] sigma                     方差，默认为1
+	 * @return float                        返回得分
+	 */
+	float Initializer::CheckFundamental(
+		const cv::Mat &F21,                  //当前帧和参考帧之间的基础矩阵
+		std::vector<bool> &vbMatchesInliers, //匹配的特征点对属于inliers的标记
+		float sigma)                         //方差
+	{
+
+		// 说明：在已值n维观测数据误差服从N(0，sigma）的高斯分布时
+		// 其误差加权最小二乘结果为  sum_error = SUM(e(i)^T * Q^(-1) * e(i))
+		// 其中：e(i) = [e_x,e_y,...]^T, Q维观测数据协方差矩阵，即sigma * sigma组成的协方差矩阵
+		// 误差加权最小二次结果越小，说明观测数据精度越高
+		// 那么，score = SUM((th - e(i)^T * Q^(-1) * e(i)))的分数就越高
+		// 算法目标：检查基础矩阵
+		// 检查方式：利用对极几何原理 p2^T * F * p1 = 0
+		// 假设：三维空间中的点 P 在 img1 和 img2 两图像上的投影分别为 p1 和 p2（两个为同名点）
+		//   则：p2 一定存在于极线 l2 上，即 p2*l2 = 0. 而l2 = F*p1 = (a, b, c)^T
+		//      所以，这里的误差项 e 为 p2 到 极线 l2 的距离，如果在直线上，则 e = 0
+		//      根据点到直线的距离公式：d = (ax + by + c) / sqrt(a * a + b * b)
+		//      所以，e =  (a * p2.x + b * p2.y + c) /  sqrt(a * a + b * b)
+
+		// 算法流程
+		// input: 基础矩阵 F 左右视图匹配点集 mvKeys1
+		//    do:
+		//        for p1(i), p2(i) in mvKeys:
+		//           l2 = F * p1(i)
+		//           l1 = p2(i) * F
+		//           error_i1 = dist_point_to_line(x2,l2)
+		//           error_i2 = dist_point_to_line(x1,l1)
+		//           
+		//           w1 = 1 / sigma / sigma
+		//           w2 = 1 / sigma / sigma
+		// 
+		//           if error1 < th
+		//              score +=   thScore - error_i1 * w1
+		//           if error2 < th
+		//              score +=   thScore - error_i2 * w2
+		// 
+		//           if error_1i > th or error_2i > th
+		//              p1(i), p2(i) are inner points
+		//              vbMatchesInliers(i) = true
+		//           else 
+		//              p1(i), p2(i) are outliers
+		//              vbMatchesInliers(i) = false
+		//           end
+		//        end
+		//   output: score, inliers
+
+		// 获取匹配的特征点对的总对数
+		const int N = mvMatches12.size();
+
+		// Step 1 提取基础矩阵中的元素数据
+		const float f11 = F21.at<float>(0, 0);
+		const float f12 = F21.at<float>(0, 1);
+		const float f13 = F21.at<float>(0, 2);
+		const float f21 = F21.at<float>(1, 0);
+		const float f22 = F21.at<float>(1, 1);
+		const float f23 = F21.at<float>(1, 2);
+		const float f31 = F21.at<float>(2, 0);
+		const float f32 = F21.at<float>(2, 1);
+		const float f33 = F21.at<float>(2, 2);
+
+		// 预分配空间
+		vbMatchesInliers.resize(N);
+
+		// 设置评分初始值（因为后面需要进行这个数值的累计）
+		float score = 0;
+
+		// 基于卡方检验计算出的阈值
+		// 自由度为1的卡方分布，显著性水平为0.05，对应的临界阈值
+		// ?是因为点到直线距离是一个自由度吗？
+		const float th = 3.841;
+
+		// 自由度为2的卡方分布，显著性水平为0.05，对应的临界阈值
+		const float thScore = 5.991;
+
+		// 信息矩阵，或 协方差矩阵的逆矩阵
+		const float invSigmaSquare = 1.0 / (sigma*sigma);
+
+
+		// Step 2 计算img1 和 img2 在估计 F 时的score值
+		for (int i = 0; i < N; i++)
+		{
+			//默认为这对特征点是Inliers
+			bool bIn = true;
+
+			// Step 2.1 提取参考帧和当前帧之间的特征匹配点对
+			const cv::KeyPoint &kp1 = mvKeys1[mvMatches12[i].first];
+			const cv::KeyPoint &kp2 = mvKeys2[mvMatches12[i].second];
+
+			// 提取出特征点的坐标
+			const float u1 = kp1.pt.x;
+			const float v1 = kp1.pt.y;
+			const float u2 = kp2.pt.x;
+			const float v2 = kp2.pt.y;
+
+			// Reprojection error in second image
+			// Step 2.2 计算 img1 上的点在 img2 上投影得到的极线 l2 = F21 * p1 = (a2,b2,c2)
+			const float a2 = f11 * u1 + f12 * v1 + f13;
+			const float b2 = f21 * u1 + f22 * v1 + f23;
+			const float c2 = f31 * u1 + f32 * v1 + f33;
+
+			// Step 2.3 计算误差 e = (a * p2.x + b * p2.y + c) /  sqrt(a * a + b * b)
+			const float num2 = a2 * u2 + b2 * v2 + c2;
+			const float squareDist1 = num2 * num2 / (a2*a2 + b2 * b2);
+			// 带权重误差
+			const float chiSquare1 = squareDist1 * invSigmaSquare;
+
+			// Step 2.4 误差大于阈值就说明这个点是Outlier 
+			// ? 为什么判断阈值用的 th（1自由度），计算得分用的thScore（2自由度）
+			// ? 可能是为了和CheckHomography 得分统一？
+			if (chiSquare1 > th)
+				bIn = false;
+			else
+				// 误差越大，得分越低
+				score += thScore - chiSquare1;
+
+			// 计算img2上的点在 img1 上投影得到的极线 l1= p2 * F21 = (a1,b1,c1)
+			const float a1 = f11 * u2 + f21 * v2 + f31;
+			const float b1 = f12 * u2 + f22 * v2 + f32;
+			const float c1 = f13 * u2 + f23 * v2 + f33;
+
+			// 计算误差 e = (a * p2.x + b * p2.y + c) /  sqrt(a * a + b * b)
+			const float num1 = a1 * u1 + b1 * v1 + c1;
+			const float squareDist2 = num1 * num1 / (a1*a1 + b1 * b1);
+
+			// 带权重误差
+			const float chiSquare2 = squareDist2 * invSigmaSquare;
+
+			// 误差大于阈值就说明这个点是Outlier 
+			if (chiSquare2 > th)
+				bIn = false;
+			else
+				score += thScore - chiSquare2;
+
+			// Step 2.5 保存结果
+			if (bIn)
+				vbMatchesInliers[i] = true;
+			else
+				vbMatchesInliers[i] = false;
+		}
+		//  返回评分
+		return score;
+	}
+
+	/**
+	 * @brief 用H矩阵恢复R, t和三维点
+	 * H矩阵分解常见有两种方法：Faugeras SVD-based decomposition 和 Zhang SVD-based decomposition
+	 * 代码使用了Faugeras SVD-based decomposition算法，参考文献
+	 * Motion and structure from motion in a piecewise planar environment. International Journal of Pattern Recognition and Artificial Intelligence, 1988
+	 *
+	 * @param[in] vbMatchesInliers          匹配点对的内点标记
+	 * @param[in] H21                       从参考帧到当前帧的单应矩阵
+	 * @param[in] K                         相机的内参数矩阵
+	 * @param[in & out] R21                 计算出来的相机旋转
+	 * @param[in & out] t21                 计算出来的相机平移
+	 * @param[in & out] vP3D                世界坐标系下，三角化测量特征点对之后得到的特征点的空间坐标
+	 * @param[in & out] vbTriangulated      特征点是否成功三角化的标记
+	 * @param[in] minParallax               对特征点的三角化测量中，认为其测量有效时需要满足的最小视差角（如果视差角过小则会引起非常大的观测误差）,单位是角度
+	 * @param[in] minTriangulated           为了进行运动恢复，所需要的最少的三角化测量成功的点个数
+	 * @return true                         单应矩阵成功计算出位姿和三维点
+	 * @return false                        初始化失败
+	 */
+	bool Initializer::ReconstructH(std::vector<bool> &vbMatchesInliers, cv::Mat &H21, cv::Mat &K,
+		cv::Mat &R21, cv::Mat &t21, std::vector<cv::Point3f> &vP3D, std::vector<bool> &vbTriangulated, float minParallax, int minTriangulated)
+	{
+		// 目的 ：通过单应矩阵H恢复两帧图像之间的旋转矩阵R和平移向量T
+		// 参考 ：Motion and structure from motion in a piecewise plannar environment.
+		//        International Journal of Pattern Recognition and Artificial Intelligence, 1988
+		// https://www.researchgate.net/publication/243764888_Motion_and_Structure_from_Motion_in_a_Piecewise_Planar_Environment
+
+		// 流程:
+		//      1. 根据H矩阵的奇异值d'= d2 或者 d' = -d2 分别计算 H 矩阵分解的 8 组解
+		//        1.1 讨论 d' > 0 时的 4 组解
+		//        1.2 讨论 d' < 0 时的 4 组解
+		//      2. 对 8 组解进行验证，并选择产生相机前方最多3D点的解为最优解
+
+		// 统计匹配的特征点对中属于内点(Inlier)或有效点个数
+		int N = 0;
+		for (size_t i = 0, iend = vbMatchesInliers.size(); i < iend; i++)
+			if (vbMatchesInliers[i])
+				N++;
+
+		// 参考SLAM十四讲第二版p170-p171
+		// H = K * (R - t * n / d) * K_inv
+		// 其中: K表示内参数矩阵
+		//       K_inv 表示内参数矩阵的逆
+		//       R 和 t 表示旋转和平移向量
+		//       n 表示平面法向量
+		// 令 H = K * A * K_inv
+		// 则 A = k_inv * H * k
+		cv::Mat invK = K.inv();
+		cv::Mat A = invK * H21*K;
+
+		// 对矩阵A进行SVD分解
+		// A 等待被进行奇异值分解的矩阵
+		// w 奇异值矩阵
+		// U 奇异值分解左矩阵
+		// Vt 奇异值分解右矩阵，注意函数返回的是转置
+		// cv::SVD::FULL_UV 全部分解
+		// A = U * w * Vt
+		cv::Mat U, w, Vt, V;
+		cv::SVD::compute(A, w, U, Vt, cv::SVD::FULL_UV);
+
+		// 根据文献eq(8)，计算关联变量
+		V = Vt.t();
+
+		// 计算变量s = det(U) * det(V)
+		// 因为det(V)==det(Vt), 所以 s = det(U) * det(Vt)
+		float s = cv::determinant(U)*cv::determinant(Vt);
+
+		// 取得矩阵的各个奇异值
+		float d1 = w.at<float>(0);
+		float d2 = w.at<float>(1);
+		float d3 = w.at<float>(2);
+
+		// SVD分解正常情况下特征值di应该是正的，且满足d1>=d2>=d3
+		if (d1 / d2 < 1.00001 || d2 / d3 < 1.00001) {
+			return false;
+		}
+
+		// 在ORBSLAM中没有对奇异值 d1 d2 d3按照论文中描述的关系进行分类讨论, 而是直接进行了计算
+		// 定义8中情况下的旋转矩阵、平移向量和空间向量
+		std::vector<cv::Mat> vR, vt, vn;
+		vR.reserve(8);
+		vt.reserve(8);
+		vn.reserve(8);
+
+		// Step 1.1 讨论 d' > 0 时的 4 组解
+		// 根据论文eq.(12)有
+		// x1 = e1 * sqrt((d1 * d1 - d2 * d2) / (d1 * d1 - d3 * d3))
+		// x2 = 0
+		// x3 = e3 * sqrt((d2 * d2 - d2 * d2) / (d1 * d1 - d3 * d3))
+		// 令 aux1 = sqrt((d1*d1-d2*d2)/(d1*d1-d3*d3))
+		//    aux3 = sqrt((d2*d2-d3*d3)/(d1*d1-d3*d3))
+		// 则
+		// x1 = e1 * aux1
+		// x3 = e3 * aux2
+
+		// 因为 e1,e2,e3 = 1 or -1
+		// 所以有x1和x3有四种组合
+		// x1 =  {aux1,aux1,-aux1,-aux1}
+		// x3 =  {aux3,-aux3,aux3,-aux3}
+
+		float aux1 = sqrt((d1*d1 - d2 * d2) / (d1*d1 - d3 * d3));
+		float aux3 = sqrt((d2*d2 - d3 * d3) / (d1*d1 - d3 * d3));
+		float x1[] = { aux1,aux1,-aux1,-aux1 };
+		float x3[] = { aux3,-aux3,aux3,-aux3 };
+
+		// 根据论文eq.(13)有
+		// sin(theta) = e1 * e3 * sqrt(( d1 * d1 - d2 * d2) * (d2 * d2 - d3 * d3)) /(d1 + d3)/d2
+		// cos(theta) = (d2* d2 + d1 * d3) / (d1 + d3) / d2 
+		// 令  aux_stheta = sqrt((d1*d1-d2*d2)*(d2*d2-d3*d3))/((d1+d3)*d2)
+		// 则  sin(theta) = e1 * e3 * aux_stheta
+		//     cos(theta) = (d2*d2+d1*d3)/((d1+d3)*d2)
+		// 因为 e1 e2 e3 = 1 or -1
+		// 所以 sin(theta) = {aux_stheta, -aux_stheta, -aux_stheta, aux_stheta}
+		float aux_stheta = sqrt((d1*d1 - d2 * d2)*(d2*d2 - d3 * d3)) / ((d1 + d3)*d2);
+		float ctheta = (d2*d2 + d1 * d3) / ((d1 + d3)*d2);
+		float stheta[] = { aux_stheta, -aux_stheta, -aux_stheta, aux_stheta };
+
+		// 计算旋转矩阵 R'
+		//根据不同的e1 e3组合所得出来的四种R t的解
+		//      | ctheta      0   -aux_stheta|       | aux1|
+		// Rp = |    0        1       0      |  tp = |  0  |
+		//      | aux_stheta  0    ctheta    |       |-aux3|
+
+		//      | ctheta      0    aux_stheta|       | aux1|
+		// Rp = |    0        1       0      |  tp = |  0  |
+		//      |-aux_stheta  0    ctheta    |       | aux3|
+
+		//      | ctheta      0    aux_stheta|       |-aux1|
+		// Rp = |    0        1       0      |  tp = |  0  |
+		//      |-aux_stheta  0    ctheta    |       |-aux3|
+
+		//      | ctheta      0   -aux_stheta|       |-aux1|
+		// Rp = |    0        1       0      |  tp = |  0  |
+		//      | aux_stheta  0    ctheta    |       | aux3|
+		// 开始遍历这四种情况中的每一种
+		for (int i = 0; i < 4; i++)
+		{
+			//生成Rp，就是eq.(8) 的 R'
+			cv::Mat Rp = cv::Mat::eye(3, 3, CV_32F);
+			Rp.at<float>(0, 0) = ctheta;
+			Rp.at<float>(0, 2) = -stheta[i];
+			Rp.at<float>(2, 0) = stheta[i];
+			Rp.at<float>(2, 2) = ctheta;
+
+			// eq.(8) 计算R
+			cv::Mat R = s * U*Rp*Vt;
+
+			// 保存
+			vR.push_back(R);
+
+			// eq. (14) 生成tp 
+			cv::Mat tp(3, 1, CV_32F);
+			tp.at<float>(0) = x1[i];
+			tp.at<float>(1) = 0;
+			tp.at<float>(2) = -x3[i];
+			tp *= d1 - d3;
+
+			// 这里虽然对t有归一化，并没有决定单目整个SLAM过程的尺度
+			// 因为CreateInitialMapMonocular函数对3D点深度会缩放，然后反过来对 t 有改变
+			// eq.(8)恢复原始的t
+			cv::Mat t = U * tp;
+			vt.push_back(t / cv::norm(t));
+
+			// 构造法向量np
+			cv::Mat np(3, 1, CV_32F);
+			np.at<float>(0) = x1[i];
+			np.at<float>(1) = 0;
+			np.at<float>(2) = x3[i];
+
+			// eq.(8) 恢复原始的法向量
+			cv::Mat n = V * np;
+			//看PPT 16页的图，保持平面法向量向上
+			if (n.at<float>(2) < 0)
+				n = -n;
+			// 添加到vector
+			vn.push_back(n);
+		}
+
+		// Step 1.2 讨论 d' < 0 时的 4 组解
+		float aux_sphi = sqrt((d1*d1 - d2 * d2)*(d2*d2 - d3 * d3)) / ((d1 - d3)*d2);
+		// cos_theta项
+		float cphi = (d1*d3 - d2 * d2) / ((d1 - d3)*d2);
+		// 考虑到e1,e2的取值，这里的sin_theta有两种可能的解
+		float sphi[] = { aux_sphi, -aux_sphi, -aux_sphi, aux_sphi };
+
+		// 对于每种由e1 e3取值的组合而形成的四种解的情况
+		for (int i = 0; i < 4; i++)
+		{
+			// 计算旋转矩阵 R'
+			cv::Mat Rp = cv::Mat::eye(3, 3, CV_32F);
+			Rp.at<float>(0, 0) = cphi;
+			Rp.at<float>(0, 2) = sphi[i];
+			Rp.at<float>(1, 1) = -1;
+			Rp.at<float>(2, 0) = sphi[i];
+			Rp.at<float>(2, 2) = -cphi;
+
+			// 恢复出原来的R
+			cv::Mat R = s * U*Rp*Vt;
+			// 然后添加到vector中
+			vR.push_back(R);
+
+			// 构造tp
+			cv::Mat tp(3, 1, CV_32F);
+			tp.at<float>(0) = x1[i];
+			tp.at<float>(1) = 0;
+			tp.at<float>(2) = x3[i];
+			tp *= d1 + d3;
+
+			// 恢复出原来的t
+			cv::Mat t = U * tp;
+			// 归一化之后加入到vector中,要提供给上面的平移矩阵都是要进行过归一化的
+			vt.push_back(t / cv::norm(t));
+
+			// 构造法向量np
+			cv::Mat np(3, 1, CV_32F);
+			np.at<float>(0) = x1[i];
+			np.at<float>(1) = 0;
+			np.at<float>(2) = x3[i];
+
+			// 恢复出原来的法向量
+			cv::Mat n = V * np;
+			// 保证法向量指向上方
+			if (n.at<float>(2) < 0)
+				n = -n;
+			// 添加到vector中
+			vn.push_back(n);
+		}
+
+		// 最好的good点
+		int bestGood = 0;
+		// 其次最好的good点
+		int secondBestGood = 0;
+		// 最好的解的索引，初始值为-1
+		int bestSolutionIdx = -1;
+		// 最大的视差角
+		float bestParallax = -1;
+		// 存储最好解对应的，对特征点对进行三角化测量的结果
+		std::vector<cv::Point3f> bestP3D;
+		// 最佳解所对应的，那些可以被三角化测量的点的标记
+		std::vector<bool> bestTriangulated;
+
+		// Step 2. 对 8 组解进行验证，并选择产生相机前方最多3D点的解为最优解
+		for (size_t i = 0; i < 8; i++)
+		{
+			// 第i组解对应的比较大的视差角
+			float parallaxi;
+			// 三角化测量之后的特征点的空间坐标
+			std::vector<cv::Point3f> vP3Di;
+			// 特征点对是否被三角化的标记
+			std::vector<bool> vbTriangulatedi;
+
+			// 调用 Initializer::CheckRT(), 计算good点的数目
+			int nGood = CheckRT(vR[i], vt[i],                    //当前组解的旋转矩阵和平移向量
+				mvKeys1, mvKeys2,                //特征点
+				mvMatches12, vbMatchesInliers,   //特征匹配关系以及Inlier标记
+				K,                               //相机的内参数矩阵
+				vP3Di,                           //存储三角化测量之后的特征点空间坐标的
+				mSigma2,						 //三角化过程中允许的最大重投影误差
+				vbTriangulatedi);                //特征点是否被成功进行三角测量的标记
+
+			// 更新历史最优和次优的解
+			// 保留最优的和次优的解.保存次优解的目的是看看最优解是否突出
+			if (nGood > bestGood)
+			{
+				// 如果当前组解的good点数是历史最优，那么之前的历史最优就变成了历史次优
+				secondBestGood = bestGood;
+				// 更新历史最优点
+				bestGood = nGood;
+				// 最优解的组索引为i（就是当前次遍历）
+				bestSolutionIdx = i;
+				// 更新变量
+				bestParallax = parallaxi;
+				bestP3D = vP3Di;
+				bestTriangulated = vbTriangulatedi;
+			}
+			// 如果当前组的good计数小于历史最优但却大于历史次优
+			else if (nGood > secondBestGood)
+			{
+				// 说明当前组解是历史次优点，更新之
+				secondBestGood = nGood;
+			}
+		}
+
+		// Step 3 选择最优解。要满足下面的四个条件
+		// 1. good点数最优解明显大于次优解，这里取0.75经验值
+		// 2. 视角差大于规定的阈值
+		// 3. good点数要大于规定的最小的被三角化的点数量
+		// 4. good数要足够多，达到总数的90%以上
+		if (secondBestGood<0.75*bestGood &&
+			bestGood>minTriangulated &&
+			bestGood > 0.9*N)
+		{
+			// 从最佳的解的索引访问到R，t
+			vR[bestSolutionIdx].copyTo(R21);
+			vt[bestSolutionIdx].copyTo(t21);
+			// 获得最佳解时，成功三角化的三维点，以后作为初始地图点使用
+			vP3D = bestP3D;
+			// 获取特征点的被成功进行三角化的标记
+			vbTriangulated = bestTriangulated;
+
+			//返回真，找到了最好的解
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * @brief 从基础矩阵F中求解位姿R，t及三维点
+	 * F分解出E，E有四组解，选择计算的有效三维点（在摄像头前方、投影误差小于阈值、视差角大于阈值）最多的作为最优的解
+	 * @param[in] vbMatchesInliers          匹配好的特征点对的Inliers标记
+	 * @param[in] F21                       从参考帧到当前帧的基础矩阵
+	 * @param[in] K                         相机的内参数矩阵
+	 * @param[in & out] R21                 计算好的相机从参考帧到当前帧的旋转
+	 * @param[in & out] t21                 计算好的相机从参考帧到当前帧的平移
+	 * @param[in & out] vP3D                三角化测量之后的特征点的空间坐标
+	 * @param[in & out] vbTriangulated      特征点三角化成功的标志
+	 * @param[in] minParallax               认为三角化有效的最小视差角
+	 * @param[in] minTriangulated           最小三角化点数量
+	 * @return true                         成功初始化
+	 * @return false                        初始化失败
+	 */
+	bool Initializer::ReconstructF(std::vector<bool> &vbMatchesInliers, cv::Mat &F21, cv::Mat &K,
+		cv::Mat &R21, cv::Mat &t21, std::vector<cv::Point3f> &vP3D, std::vector<bool> &vbTriangulated, float minParallax, int minTriangulated)
+	{
+		// Step 1 统计有效匹配点个数，并用 N 表示
+		// vbMatchesInliers 中存储匹配点对是否是有效
+		int N = 0;
+		for (size_t i = 0, iend = vbMatchesInliers.size(); i < iend; i++)
+			if (vbMatchesInliers[i]) N++;
+
+		// Step 2 根据基础矩阵和相机的内参数矩阵计算本质矩阵
+		cv::Mat E21 = K.t()*F21*K;
+
+		// 定义本质矩阵分解结果，形成四组解,分别是：
+		// (R1, t) (R1, -t) (R2, t) (R2, -t)
+		cv::Mat R1, R2, t;
+
+		// Step 3 从本质矩阵求解两个R解和两个t解，共四组解
+		// 不过由于两个t解互为相反数，因此这里先只获取一个
+		// 虽然这个函数对t有归一化，但并没有决定单目整个SLAM过程的尺度. 
+		// 因为 CreateInitialMapMonocular 函数对3D点深度会缩放，然后反过来对 t 有改变.
+		//注意下文中的符号“'”表示矩阵的转置
+		//                          |0 -1  0|
+		// E = U Sigma V'   let W = |1  0  0|
+		//                          |0  0  1|
+		// 得到4个解 E = [R|t]
+		// R1 = UWV' R2 = UW'V' t1 = U3 t2 = -U3
+		DecomposeE(E21, R1, R2, t);
+		cv::Mat t1 = t;
+		cv::Mat t2 = -t;
+
+		// Step 4 分别验证求解的4种R和t的组合，选出最佳组合
+		// 原理：若某一组合使恢复得到的3D点位于相机正前方的数量最多，那么该组合就是最佳组合
+		// 实现：根据计算的解组合成为四种情况,并依次调用 Initializer::CheckRT() 进行检查,得到可以进行三角化测量的点的数目
+		// 定义四组解分别在对同一匹配点集进行三角化测量之后的特征点空间坐标
+		std::vector<cv::Point3f> vP3D1, vP3D2, vP3D3, vP3D4;
+
+		// 定义四组解分别对同一匹配点集的有效三角化结果，True or False
+		std::vector<bool> vbTriangulated1, vbTriangulated2, vbTriangulated3, vbTriangulated4;
+
+		// Step 4.1 使用同样的匹配点分别检查四组解，记录当前计算的3D点在摄像头前方且投影误差小于阈值的个数，记为有效3D点个数
+		int nGood1 = CheckRT(R1, t1,							//当前组解
+			mvKeys1, mvKeys2,				//参考帧和当前帧中的特征点
+			mvMatches12, vbMatchesInliers,	//特征点的匹配关系和Inliers标记
+			K, 								//相机的内参数矩阵
+			vP3D1,							//存储三角化以后特征点的空间坐标
+			mSigma2,						//三角化测量过程中允许的最大重投影误差
+			vbTriangulated1);				//参考帧中被成功进行三角化测量的特征点的标记
+		int nGood2 = CheckRT(R2, t1, mvKeys1, mvKeys2, mvMatches12, vbMatchesInliers, K, vP3D2, mSigma2, vbTriangulated2);
+		int nGood3 = CheckRT(R1, t2, mvKeys1, mvKeys2, mvMatches12, vbMatchesInliers, K, vP3D3, mSigma2, vbTriangulated3);
+		int nGood4 = CheckRT(R2, t2, mvKeys1, mvKeys2, mvMatches12, vbMatchesInliers, K, vP3D4, mSigma2, vbTriangulated4);
+
+		// Step 4.2 选取最大可三角化测量的点的数目
+		int maxGood = std::max(nGood1, std::max(nGood2, std::max(nGood3, nGood4)));
+
+		// 重置变量，并在后面赋值为最佳R和T
+		R21 = cv::Mat();
+		t21 = cv::Mat();
+
+		// 统计四组解中重建的有效3D点个数 > 0.7 * maxGood 的解的数目
+		// 如果有多个解同时满足该条件，认为结果太接近，nsimilar++，nsimilar>1就认为有问题了，后面返回false
+		int nsimilar = 0;
+		if (nGood1 > 0.7*maxGood)
+			nsimilar++;
+		if (nGood2 > 0.7*maxGood)
+			nsimilar++;
+		if (nGood3 > 0.7*maxGood)
+			nsimilar++;
+		if (nGood4 > 0.7*maxGood)
+			nsimilar++;
+
+		// Step 4.4 四个结果中如果没有明显的最优结果，或者没有足够数量的三角化点，则返回失败
+		// 条件1: 如果四组解能够重建的最多3D点个数小于所要求的最少3D点个数（mMinGood），失败
+		// 条件2: 如果存在两组及以上的解能三角化出 >0.7*maxGood的点，说明没有明显最优结果，失败
+		if (maxGood < minTriangulated || nsimilar > 1)
+		{
+			return false;
+		}
+
+		//  Step 4.5 选择最佳解记录结果
+		// 条件1: 有效重建最多的3D点，即maxGood == nGoodx，也即是位于相机前方的3D点个数最多
+		// 条件2: 三角化视差角 parallax 必须大于最小视差角 minParallax，角度越大3D点越稳定
+
+		//看看最好的good点是在哪种解的条件下发生的
+		if (maxGood == nGood1)
+		{
+			// 存储3D坐标
+			vP3D = vP3D1;
+
+			// 获取特征点向量的三角化测量标记
+			vbTriangulated = vbTriangulated1;
+
+			// 存储相机姿态
+			R1.copyTo(R21);
+			t1.copyTo(t21);
+
+			// 结束
+			return true;
+		}
+		else if (maxGood == nGood2)
+		{
+			vP3D = vP3D2;
+			vbTriangulated = vbTriangulated2;
+
+			R2.copyTo(R21);
+			t1.copyTo(t21);
+			return true;
+		}
+		else if (maxGood == nGood3)
+		{
+			vP3D = vP3D3;
+			vbTriangulated = vbTriangulated3;
+
+			R1.copyTo(R21);
+			t2.copyTo(t21);
+			return true;
+		}
+		else if (maxGood == nGood4)
+		{
+			vP3D = vP3D4;
+			vbTriangulated = vbTriangulated4;
+
+			R2.copyTo(R21);
+			t2.copyTo(t21);
+			return true;
+		}
+
+		// 如果有最优解但是不满足对应的parallax>minParallax，那么返回false表示求解失败
+		return false;
+	}
+
+	/**
+	 * @brief 用位姿来对特征匹配点三角化，从中筛选中合格的三维点
+	 *
+	 * @param[in] R                                     旋转矩阵R
+	 * @param[in] t                                     平移矩阵t
+	 * @param[in] vKeys1                                参考帧特征点
+	 * @param[in] vKeys2                                当前帧特征点
+	 * @param[in] vMatches12                            两帧特征点的匹配关系
+	 * @param[in] vbMatchesInliers                      特征点对内点标记
+	 * @param[in] K                                     相机内参矩阵
+	 * @param[in & out] vP3D                            三角化测量之后的特征点的空间坐标
+	 * @param[in] th2                                   重投影误差的阈值
+	 * @param[in & out] vbGood                          标记成功三角化点？
+	 * @return int
+	 */
+	int Initializer::CheckRT(const cv::Mat &R, const cv::Mat &t, const std::vector<cv::KeyPoint> &vKeys1, const std::vector<cv::KeyPoint> &vKeys2,
+		const std::vector<Match> &vMatches12, std::vector<bool> &vbMatchesInliers,
+		const cv::Mat &K, std::vector<cv::Point3f> &vP3D, float th2, std::vector<bool> &vbGood)
+	{
+		// 对给出的特征点对及其R t , 通过三角化检查解的有效性，也称为 cheirality check
+
+		// Calibration parameters
+		//从相机内参数矩阵获取相机的校正参数
+		const float fx = K.at<float>(0, 0);
+		const float fy = K.at<float>(1, 1);
+		const float cx = K.at<float>(0, 2);
+		const float cy = K.at<float>(1, 2);
+
+		//特征点是否是good点的标记，这里的特征点指的是参考帧中的特征点
+		vbGood = std::vector<bool>(vKeys1.size(), false);
+		//重设存储空间坐标的点的大小
+		vP3D.resize(vKeys1.size());
+
+		//存储计算出来的每对特征点的视差
+		std::vector<float> vCosParallax;
+		vCosParallax.reserve(vKeys1.size());
+
+		// Camera 1 Projection Matrix K[I|0]
+		// Step 1：计算相机的投影矩阵  
+		// 投影矩阵P是一个 3x4 的矩阵，可以将空间中的一个点投影到平面上，获得其平面坐标，这里均指的是齐次坐标。
+		// 对于第一个相机是 P1=K*[I|0]
+
+		// 以第一个相机的光心作为世界坐标系, 定义相机的投影矩阵
+		cv::Mat P1(3, 4,				//矩阵的大小是3x4
+			CV_32F,						//数据类型是浮点数
+			cv::Scalar(0));				//初始的数值是0
+		//将整个K矩阵拷贝到P1矩阵的左侧3x3矩阵，因为 K*I = K
+		K.copyTo(P1.rowRange(0, 3).colRange(0, 3));
+		// 第一个相机的光心设置为世界坐标系下的原点
+		cv::Mat O1 = cv::Mat::zeros(3, 1, CV_32F);
+
+		// Camera 2 Projection Matrix K[R|t]
+		// 计算第二个相机的投影矩阵 P2=K*[R|t]
+		cv::Mat P2(3, 4, CV_32F);
+		R.copyTo(P2.rowRange(0, 3).colRange(0, 3));
+		t.copyTo(P2.rowRange(0, 3).col(3));
+		//最终结果是K*[R|t]
+		P2 = K * P2;
+		// 第二个相机的光心在世界坐标系下的坐标
+		cv::Mat O2 = -R.t()*t;
+
+		//在遍历开始前，先将good点计数设置为0
+		int nGood = 0;
+
+		// 开始遍历所有的特征点对
+		for (size_t i = 0, iend = vMatches12.size(); i < iend; i++)
+		{
+			// 跳过outliers
+			if (!vbMatchesInliers[i])
+				continue;
+
+			// Step 2 获取特征点对，调用Triangulate() 函数进行三角化，得到三角化测量之后的3D点坐标
+			// kp1和kp2是匹配好的有效特征点
+			const cv::KeyPoint &kp1 = vKeys1[vMatches12[i].first];
+			const cv::KeyPoint &kp2 = vKeys2[vMatches12[i].second];
+
+			//存储三维点的的坐标
+			cv::Mat p3dC1;
+
+			// 利用三角法恢复三维点p3dC1
+			Triangulate(kp1, kp2,	//特征点
+				P1, P2,				//投影矩阵
+				p3dC1);				//输出，三角化测量之后特征点的空间坐标		
+
+			// Step 3 第一关：检查三角化的三维点坐标是否合法（非无穷值）
+			// 只要三角测量的结果中有一个是无穷大的就说明三角化失败，跳过对当前点的处理，进行下一对特征点的遍历 
+			if (!isfinite(p3dC1.at<float>(0)) || !isfinite(p3dC1.at<float>(1)) || !isfinite(p3dC1.at<float>(2)))
+			{
+				//其实这里就算是不这样写也没问题，因为默认的匹配点对就不是good点
+				vbGood[vMatches12[i].first] = false;
+				//继续对下一对匹配点的处理
+				continue;
+			}
+
+			// Step 4 第二关：通过三维点深度值正负、两相机光心视差角大小来检查是否合法 
+			// 讲空间点p3dC1变换到第2个相机坐标系下变为p3dC2
+			cv::Mat p3dC2 = R * p3dC1 + t;
+			if ((p3dC1.at<float>(2) <= 0 || p3dC2.at<float>(2) <= 0))
+				continue;
+
+			// Step 5 第三关：计算空间点在参考帧和当前帧上的重投影误差，如果大于阈值则舍弃
+			// 计算3D点在第一个图像上的投影误差
+			//投影到参考帧图像上的点的坐标x,y
+			float im1x, im1y;
+			//这个使能空间点的z坐标的倒数
+			float invZ1 = 1.0 / p3dC1.at<float>(2);
+			//投影到参考帧图像上。因为参考帧下的相机坐标系和世界坐标系重合，因此这里就直接进行投影就可以了
+			im1x = fx * p3dC1.at<float>(0)*invZ1 + cx;
+			im1y = fy * p3dC1.at<float>(1)*invZ1 + cy;
+
+			//参考帧上的重投影误差，这个的确就是按照定义来的
+			float squareError1 = (im1x - kp1.pt.x)*(im1x - kp1.pt.x) + (im1y - kp1.pt.y)*(im1y - kp1.pt.y);
+
+			// 重投影误差太大，跳过淘汰
+			if (squareError1 > th2)
+				continue;
+
+			// 计算3D点在第二个图像上的投影误差，计算过程和第一个图像类似
+			float im2x, im2y;
+			// 注意这里的p3dC2已经是第二个相机坐标系下的三维点了
+			float invZ2 = 1.0 / p3dC2.at<float>(2);
+			im2x = fx * p3dC2.at<float>(0)*invZ2 + cx;
+			im2y = fy * p3dC2.at<float>(1)*invZ2 + cy;
+
+			// 计算重投影误差
+			float squareError2 = (im2x - kp2.pt.x)*(im2x - kp2.pt.x) + (im2y - kp2.pt.y)*(im2y - kp2.pt.y);
+
+			// 重投影误差太大，跳过淘汰
+			if (squareError2 > th2)
+				continue;
+			
+			//三角化成功
+			vbGood[vMatches12[i].first] = true;
+
+			//存储这个三角化测量后的3D点在世界坐标系下的坐标
+			vP3D[vMatches12[i].first] = cv::Point3f(p3dC1.at<float>(0), p3dC1.at<float>(1), p3dC1.at<float>(2));
+			//good点计数++
+			nGood++;
+		}
+
+		//返回good点计数
+		return nGood;
+	}
+
+	/** 给定投影矩阵P1,P2和图像上的匹配特征点点kp1,kp2，从而计算三维点坐标
+	 * @brief
+	 *
+	 * @param[in] kp1               特征点, in reference frame
+	 * @param[in] kp2               特征点, in current frame
+	 * @param[in] P1                投影矩阵P1
+	 * @param[in] P2                投影矩阵P2
+	 * @param[in & out] x3D         计算的三维点
+	 */
+	void Initializer::Triangulate(
+		const cv::KeyPoint &kp1,    //特征点, in reference frame
+		const cv::KeyPoint &kp2,    //特征点, in current frame
+		const cv::Mat &P1,          //投影矩阵P1
+		const cv::Mat &P2,          //投影矩阵P2
+		cv::Mat &x3D)               //三维点
+	{
+		// 原理
+		// Trianularization: 已知匹配特征点对{x x'} 和 各自相机矩阵{P P'}, 估计三维点 X
+		// x' = P'X  x = PX
+		// 它们都属于 x = aPX模型
+		//                         |X|
+		// |x|     |p1 p2  p3  p4 ||Y|     |x|    |--p0--||.|
+		// |y| = a |p5 p6  p7  p8 ||Z| ===>|y| = a|--p1--||X|
+		// |z|     |p9 p10 p11 p12||1|     |z|    |--p2--||.|
+		// 采用DLT的方法：x叉乘PX = 0
+		// |yp2 -  p1|     |0|
+		// |p0 -  xp2| X = |0|
+		// |xp1 - yp0|     |0|
+		// 两个点:
+		// |yp2   -  p1  |     |0|
+		// |p0    -  xp2 | X = |0| ===> AX = 0
+		// |y'p2' -  p1' |     |0|
+		// |p0'   - x'p2'|     |0|
+		// 变成程序中的形式：
+		// |xp2  - p0 |     |0|
+		// |yp2  - p1 | X = |0| ===> AX = 0
+		// |x'p2'- p0'|     |0|
+		// |y'p2'- p1'|     |0|
+		// 然后就组成了一个四元一次正定方程组，SVD求解，右奇异矩阵的最后一行就是最终的解.
+
+		//这个就是上面注释中的矩阵A
+		cv::Mat A(4, 4, CV_32F);
+
+		//构造参数矩阵A
+		A.row(0) = kp1.pt.x*P1.row(2) - P1.row(0);
+		A.row(1) = kp1.pt.y*P1.row(2) - P1.row(1);
+		A.row(2) = kp2.pt.x*P2.row(2) - P2.row(0);
+		A.row(3) = kp2.pt.y*P2.row(2) - P2.row(1);
+
+		//奇异值分解的结果
+		cv::Mat u, w, vt;
+		//对系数矩阵A进行奇异值分解
+		cv::SVD::compute(A, w, u, vt, cv::SVD::MODIFY_A | cv::SVD::FULL_UV);
+		//根据前面的结论，奇异值分解右矩阵的最后一行其实就是解，原理类似于前面的求最小二乘解，四个未知数四个方程正好正定
+		//别忘了我们更习惯用列向量来表示一个点的空间坐标
+		x3D = vt.row(3).t();
+		//为了符合其次坐标的形式，使最后一维为1
+		x3D = x3D.rowRange(0, 3) / x3D.at<float>(3);
+	}
+
+	/**
+	 * @brief 分解Essential矩阵得到R,t
+	 * 分解E矩阵将得到4组解，这4组解分别为[R1,t],[R1,-t],[R2,t],[R2,-t]
+	 * 参考：Multiple View Geometry in Computer Vision - Result 9.19 p259
+	 * @param[in] E                 本质矩阵
+	 * @param[in & out] R1          旋转矩阵1
+	 * @param[in & out] R2          旋转矩阵2
+	 * @param[in & out] t           平移向量，另外一个取相反数
+	 */
+	void Initializer::DecomposeE(const cv::Mat &E, cv::Mat &R1, cv::Mat &R2, cv::Mat &t)
+	{
+
+		// 对本质矩阵进行奇异值分解
+		//准备存储对本质矩阵进行奇异值分解的结果
+		cv::Mat u, w, vt;
+		//对本质矩阵进行奇异值分解
+		cv::SVD::compute(E, w, u, vt);
+
+		// 左奇异值矩阵U的最后一列就是t，对其进行归一化
+		u.col(2).copyTo(t);
+		t = t / cv::norm(t);
+
+		// 构造一个绕Z轴旋转pi/2的旋转矩阵W，按照下式组合得到旋转矩阵 R1 = u*W*vt
+		//计算完成后要检查一下旋转矩阵行列式的数值，使其满足行列式为1的约束
+		cv::Mat W(3, 3, CV_32F, cv::Scalar(0));
+		W.at<float>(0, 1) = -1;
+		W.at<float>(1, 0) = 1;
+		W.at<float>(2, 2) = 1;
+
+		//计算
+		R1 = u * W*vt;
+		//旋转矩阵有行列式为+1的约束，所以如果算出来为负值，需要取反
+		if (cv::determinant(R1) < 0)
+			R1 = -R1;
+
+		// 同理将矩阵W取转置来按照相同的公式计算旋转矩阵R2 = u*W.t()*vt
+
+		R2 = u * W.t()*vt;
+		//旋转矩阵有行列式为1的约束
+		if (cv::determinant(R2) < 0)
+			R2 = -R2;
 	}
 
 	/**

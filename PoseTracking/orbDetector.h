@@ -211,7 +211,7 @@ namespace PoseTracking
 
 		const int PATCH_SIZE = 31;			//<使用灰度质心法计算特征点的方向信息时，图像块的大小,或者说是直径
 		const int HALF_PATCH_SIZE = 15;		//<上面这个大小的一半，或者说是半径
-		const int EDGE_THRESHOLD = 8;
+		const int EDGE_THRESHOLD = 15;
 };
 
 }

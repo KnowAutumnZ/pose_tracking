@@ -2,15 +2,16 @@
 
 namespace PoseTracking
 {
-	Frame::Frame(const Frame& frame):mbInitialComputations(frame.mbInitialComputations), 
-		mnMinX(frame.mnMinX), mnMinY(frame.mnMinY), mnMaxX(frame.mnMaxX), mnMaxY(frame.mnMaxY),
-		mfGridElementWidthInv(frame.mfGridElementWidthInv), mfGridElementHeightInv(frame.mfGridElementHeightInv)
+	//下一个生成的帧的ID,这里是初始化类的静态成员变量
+	long unsigned int Frame::nNextId = 0;
+
+	Frame::Frame(const Frame& frame):mbInitialComputations(frame.mbInitialComputations), mnMinX(frame.mnMinX), mnMinY(frame.mnMinY), mnMaxX(frame.mnMaxX), 
+		mnMaxY(frame.mnMaxY),mfGridElementWidthInv(frame.mfGridElementWidthInv), mfGridElementHeightInv(frame.mfGridElementHeightInv), mnId(frame.mnId),
+		mvpMapPoints(frame.mvpMapPoints), mvKeys(frame.mvKeys), mDescriptors(frame.mDescriptors.clone()), mvbOutlier(frame.mvbOutlier),
+		mpReferenceKF(frame.mpReferenceKF), mnScaleLevels(frame.mnScaleLevels), mfScaleFactor(frame.mfScaleFactor), mfLogScaleFactor(frame.mfLogScaleFactor),
+		mvScaleFactors(frame.mvScaleFactors), mvInvScaleFactors(frame.mvInvScaleFactors), mvLevelSigma2(frame.mvLevelSigma2), mvInvLevelSigma2(frame.mvInvLevelSigma2)
 	{
 		mTimeStamp = frame.mTimeStamp;
-		mvKeys = frame.mvKeys;
-		mvKeysRight = frame.mvKeysRight;
-		mDescriptors = frame.mDescriptors.clone();
-		mDescriptorsRight = frame.mDescriptorsRight.clone();
 
 		//新的帧设置Pose的初始值，便于后续优化
 		if (!frame.mTcw.empty())
@@ -27,6 +28,25 @@ namespace PoseTracking
 
 	Frame::Frame(const cv::Mat &imGray, const double &timeStamp, orbDetector* extractor, const cv::Mat &K, const cv::Mat &Distort):mTimeStamp(timeStamp)
 	{
+		// Step 1 帧的ID 自增
+		mnId = nNextId++;
+
+		// Step 2 计算图像金字塔的参数 
+		//获取图像金字塔的层数
+		mnScaleLevels = extractor->GetLevels();
+		//这个是获得层与层之前的缩放比
+		mfScaleFactor = extractor->GetScaleFactor();
+		//计算上面缩放比的对数, NOTICE log=自然对数，log10=才是以10为基底的对数 
+		mfLogScaleFactor = log(mfScaleFactor);
+		//获取每层图像的缩放因子
+		mvScaleFactors = extractor->GetScaleFactors();
+		//同样获取每层图像缩放因子的倒数
+		mvInvScaleFactors = extractor->GetInverseScaleFactors();
+		//高斯模糊的时候，使用的方差
+		mvLevelSigma2 = extractor->GetScaleSigmaSquares();
+		//获取sigma^2的倒数
+		mvInvLevelSigma2 = extractor->GetInverseScaleSigmaSquares();
+
 		std::vector<cv::KeyPoint> vKeys;
 
 		//这里使用了仿函数来完成，重载了括号运算符 ORBextractor::operator() 
@@ -39,15 +59,23 @@ namespace PoseTracking
 		//用OpenCV的矫正函数、内参对提取到的特征点进行矫正 
 		UndistortKeyPoints(vKeys, K, Distort);
 
-		//  计算去畸变后图像边界，将特征点分配到网格中。这个过程一般是在第一帧或者是相机标定参数发生变化之后进行
+		//mvKeys中保存的是左图像中的特征点，这里是获取左侧图像中特征点的个数
+		int N = mvKeys.size();
+
+		//初始化本帧的地图点
+		mvpMapPoints = std::vector<MapPoint*>(N, static_cast<MapPoint*>(NULL));
+		//记录地图点是否为外点，初始化均为外点false
+		mvbOutlier = std::vector<bool>(N, false);
+
+		//计算去畸变后图像边界，将特征点分配到网格中。这个过程一般是在第一帧或者是相机标定参数发生变化之后进行
 		if (mbInitialComputations)
 		{
-			// 计算去畸变后图像的边界
+			//计算去畸变后图像的边界
 			ComputeImageBounds(imGray, K, Distort);
 
-			// 表示一个图像像素相当于多少个图像网格列（宽）
+			//表示一个图像像素相当于多少个图像网格列（宽）
 			mfGridElementWidthInv = (float)(FRAME_GRID_COLS) / (float)(mnMaxX - mnMinX);
-			// 表示一个图像像素相当于多少个图像网格行（高）
+			//表示一个图像像素相当于多少个图像网格行（高）
 			mfGridElementHeightInv = (float)(FRAME_GRID_ROWS) / (float)(mnMaxY - mnMinY);
 
 			//特殊的初始化过程完成，标志复位
@@ -139,8 +167,8 @@ namespace PoseTracking
 		for (int i = 0; i < N; i++)
 		{
 			//然后将这个特征点的横纵坐标分别保存
-			mat.at<float>(i, 0) = mvKeys[i].pt.x;
-			mat.at<float>(i, 1) = mvKeys[i].pt.y;
+			mat.at<float>(i, 0) = vKeys[i].pt.x;
+			mat.at<float>(i, 1) = vKeys[i].pt.y;
 		}
 
 		cv::undistortPoints(

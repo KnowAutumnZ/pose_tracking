@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdlib>
+#include <thread>
 #include <opencv2/opencv.hpp>
 #include "Frame.h"
 
@@ -221,7 +222,7 @@ namespace PoseTracking
 		 */
 		int CheckRT(const cv::Mat &R, const cv::Mat &t, const std::vector<cv::KeyPoint> &vKeys1, const std::vector<cv::KeyPoint> &vKeys2,
 			const std::vector<Match> &vMatches12, std::vector<bool> &vbInliers,
-			const cv::Mat &K, std::vector<cv::Point3f> &vP3D, float th2, std::vector<bool> &vbGood, float &parallax);
+			const cv::Mat &K, std::vector<cv::Point3f> &vP3D, float th2, std::vector<bool> &vbGood);
 
 		/**
 		 * @brief ∑÷Ω‚Essentialæÿ’Û
