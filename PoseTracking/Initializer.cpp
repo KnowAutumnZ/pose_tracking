@@ -141,7 +141,7 @@ namespace PoseTracking
 		float RH = SH / (SH + SF);			//RH=Ratio of Homography
 
 		// 注意这里更倾向于用H矩阵恢复位姿。如果单应矩阵的评分占比达到了0.4以上,则从单应矩阵恢复运动,否则从基础矩阵恢复运动
-		if (RH > 0.5)
+		if (RH > 0.4)
 			return ReconstructH(vbMatchesInliersH,	//输入，匹配成功的特征点对Inliers标记
 				H,					//输入，前面RANSAC计算后的单应矩阵
 				mK,					//输入，相机的内参数矩阵
@@ -1034,8 +1034,6 @@ namespace PoseTracking
 		// Step 2. 对 8 组解进行验证，并选择产生相机前方最多3D点的解为最优解
 		for (size_t i = 0; i < 8; i++)
 		{
-			// 第i组解对应的比较大的视差角
-			float parallaxi;
 			// 三角化测量之后的特征点的空间坐标
 			std::vector<cv::Point3f> vP3Di;
 			// 特征点对是否被三角化的标记
@@ -1061,7 +1059,6 @@ namespace PoseTracking
 				// 最优解的组索引为i（就是当前次遍历）
 				bestSolutionIdx = i;
 				// 更新变量
-				bestParallax = parallaxi;
 				bestP3D = vP3Di;
 				bestTriangulated = vbTriangulatedi;
 			}

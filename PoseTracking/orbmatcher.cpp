@@ -14,6 +14,205 @@ namespace PoseTracking
 	}
 
 	/**
+	 * @brief 将上一帧跟踪的地图点投影到当前帧，并且搜索匹配点。用于跟踪前一帧
+	 * 步骤
+	 * Step 1 建立旋转直方图，用于检测旋转一致性
+	 * Step 2 计算当前帧和前一帧的平移向量
+	 * Step 3 对于前一帧的每一个地图点，通过相机投影模型，得到投影到当前帧的像素坐标
+	 * Step 4 根据相机的前后前进方向来判断搜索尺度范围
+	 * Step 5 遍历候选匹配点，寻找距离最小的最佳匹配点
+	 * Step 6 计算匹配点旋转角度差所在的直方图
+	 * Step 7 进行旋转一致检测，剔除不一致的匹配
+	 * @param[in] CurrentFrame          当前帧
+	 * @param[in] LastFrame             上一帧
+	 * @param[in] th                    搜索范围阈值，默认单目为7，双目15
+	 * @param[in] bMono                 是否为单目
+	 * @return int                      成功匹配的数量
+	 */
+	int ORBmatcher::SearchByProjection(Tracking* pTracking, Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool bMono)
+	{
+		int nmatches = 0;
+
+		const float fx = pTracking->mK.at<float>(0, 0);
+		const float fy = pTracking->mK.at<float>(1, 1);
+		const float cx = pTracking->mK.at<float>(0, 2);
+		const float cy = pTracking->mK.at<float>(1, 2);
+
+		// Step 1 建立旋转直方图，用于检测旋转一致性
+		std::vector<int> rotHist[HISTO_LENGTH];
+		for (int i = 0; i < HISTO_LENGTH; i++)
+			rotHist[i].reserve(500);
+
+		//! 原作者代码是 const float factor = 1.0f/HISTO_LENGTH; 是错误的，更改为下面代码
+		const float factor = HISTO_LENGTH / 360.0f;
+
+		// Step 2 计算当前帧和前一帧的平移向量
+		//当前帧的相机位姿
+		const cv::Mat Rcw = CurrentFrame.mTcw.rowRange(0, 3).colRange(0, 3);
+		const cv::Mat tcw = CurrentFrame.mTcw.rowRange(0, 3).col(3);
+
+		//当前相机坐标系到世界坐标系的平移向量（相机坐标系）
+		const cv::Mat twc = -Rcw.t()*tcw;
+
+		//  Step 3 对于前一帧的每一个地图点，通过相机投影模型，得到投影到当前帧的像素坐标
+		for (int i = 0; i < LastFrame.mvKeys.size(); i++)
+		{
+			MapPoint* pMP = LastFrame.mvpMapPoints[i];
+
+			if(!pMP) continue;
+
+			if (!LastFrame.mvbOutlier[i])
+			{
+				// 对上一帧有效的MapPoints投影到当前帧坐标系
+				cv::Mat x3Dw = pMP->GetWorldPos();
+				cv::Mat x3Dc = Rcw * x3Dw + tcw;
+
+				const float xc = x3Dc.at<float>(0);
+				const float yc = x3Dc.at<float>(1);
+				const float invzc = 1.0 / x3Dc.at<float>(2);
+
+				if (invzc < 0)
+					continue;
+
+				// 投影到当前帧中
+				float u = fx * xc*invzc + cx;
+				float v = fy * yc*invzc + cy;
+
+				if (u<CurrentFrame.mnMinX || u>CurrentFrame.mnMaxX)
+					continue;
+				if (v<CurrentFrame.mnMinY || v>CurrentFrame.mnMaxY)
+					continue;
+
+				// 上一帧中地图点对应二维特征点所在的金字塔层级
+				int nLastOctave = LastFrame.mvKeys[i].octave;
+
+				// Search in a window. Size depends on scale
+				// 单目：th = 15，双目：th = 7
+				float radius = th * CurrentFrame.mvScaleFactors[nLastOctave]; // 尺度越大，搜索范围越大
+
+				// 记录候选匹配点的id
+				std::vector<size_t> vIndices2;
+
+				// Step 4 根据相机的前后前进方向来判断搜索尺度范围。
+				vIndices2 = GetFeaturesInArea(CurrentFrame, u, v, radius, nLastOctave - 1, nLastOctave + 1);
+
+				if (vIndices2.empty())
+					continue;
+
+				const cv::Mat dMP = pMP->GetDescriptor();
+
+				int bestDist = 256;
+				int bestIdx2 = -1;
+
+				// Step 5 遍历候选匹配点，寻找距离最小的最佳匹配点 
+				for (std::vector<size_t>::const_iterator vit = vIndices2.begin(), vend = vIndices2.end(); vit != vend; vit++)
+				{
+					const size_t i2 = *vit;
+
+					// 如果该特征点已经有对应的MapPoint了,则退出该次循环
+					if (CurrentFrame.mvpMapPoints[i2])
+						if (CurrentFrame.mvpMapPoints[i2]->Observations() > 0)
+							continue;
+
+					const cv::Mat &d = CurrentFrame.mDescriptors.row(i2);
+					const int dist = DescriptorDistance(dMP, d);
+
+					if (dist < bestDist)
+					{
+						bestDist = dist;
+						bestIdx2 = i2;
+					}
+				}
+
+				// 最佳匹配距离要小于设定阈值
+				if (bestDist <= TH_HIGH)
+				{
+					CurrentFrame.mvpMapPoints[bestIdx2] = pMP;
+					nmatches++;
+
+					// Step 6 计算匹配点旋转角度差所在的直方图
+					if (mbCheckOrientation)
+					{
+						float rot = LastFrame.mvKeys[i].angle - CurrentFrame.mvKeys[bestIdx2].angle;
+						if (rot < 0.0)
+							rot += 360.0f;
+						int bin = round(rot*factor);
+						if (bin == HISTO_LENGTH)
+							bin = 0;
+						assert(bin >= 0 && bin < HISTO_LENGTH);
+						rotHist[bin].push_back(bestIdx2);
+					}
+				}
+			}
+		}
+
+		//  Step 7 进行旋转一致检测，剔除不一致的匹配
+		if (mbCheckOrientation)
+		{
+			int ind1 = -1;
+			int ind2 = -1;
+			int ind3 = -1;
+
+			ComputeThreeMaxima(rotHist, HISTO_LENGTH, ind1, ind2, ind3);
+
+			for (int i = 0; i < HISTO_LENGTH; i++)
+			{
+				// 对于数量不是前3个的点对，剔除
+				if (i != ind1 && i != ind2 && i != ind3)
+				{
+					for (size_t j = 0, jend = rotHist[i].size(); j < jend; j++)
+					{
+						CurrentFrame.mvpMapPoints[rotHist[i][j]] = static_cast<MapPoint*>(NULL);
+						nmatches--;
+					}
+				}
+			}
+		}
+		return nmatches;
+	}
+
+	int ORBmatcher::SearchForRefModel(KeyFrame *pKF, Frame &F, std::vector<MapPoint*> &vpMapPointMatches)
+	{
+		// 获取该关键帧的地图点
+		const std::vector<MapPoint*> vpMapPointsKF = pKF->GetMapPointMatches();
+		// 和普通帧F特征点的索引一致
+		vpMapPointMatches = std::vector<MapPoint*>(F.mvpMapPoints.size(), static_cast<MapPoint*>(NULL));
+
+		cv::Mat d1 = pKF->mDescriptors;
+		cv::Mat d2 = F.mDescriptors;
+
+		cv::Ptr<cv::DescriptorMatcher> matcher = cv::DescriptorMatcher::create("BruteForce-Hamming");
+		
+		std::vector<cv::DMatch> matches;
+		//BFMatcher matcher ( NORM_HAMMING );
+		matcher->match(d1, d2, matches);
+
+		//找出所有匹配之间的最小距离和最大距离, 即是最相似的和最不相似的两组点之间的距离
+		double min_dist = 10000, max_dist = 0;
+		for (int i = 0; i < d1.rows; i++)
+		{
+			double dist = matches[i].distance;
+			if (dist < min_dist) min_dist = dist;
+			if (dist > max_dist) max_dist = dist;
+		}
+
+		//当描述子之间的距离大于两倍的最小距离时,即认为匹配有误.但有时候最小距离会非常小,设置一个经验值30作为下限.
+		int nmatches = 0;
+		for (int i = 0; i < d1.rows; i++)
+		{
+			if (matches[i].distance > mfNNratio * min_dist || !vpMapPointsKF[matches[i].queryIdx]) 
+				continue;
+			else
+			{
+				vpMapPointMatches[matches[i].trainIdx] = vpMapPointsKF[matches[i].queryIdx];
+				nmatches++;
+			}
+
+		}
+		return nmatches;
+	}
+
+	/**
 	 * @brief 单目初始化中用于参考帧和当前帧的特征点匹配
 	 * 步骤
 	 * Step 1 构建旋转直方图
@@ -59,7 +258,7 @@ namespace PoseTracking
 			// vbPrevMatched 输入的是参考帧 F1的特征点
 			// windowSize = 100，输入最大最小金字塔层级 均为0
 			std::vector<size_t> vIndices2 = GetFeaturesInArea(F2, F1.mvKeys[i1].pt.x, F1.mvKeys[i1].pt.y, windowSize, level1 - 1, level1 + 1);
-
+			  
 			// 没有候选特征点，跳过
 			if (vIndices2.empty())
 				continue;

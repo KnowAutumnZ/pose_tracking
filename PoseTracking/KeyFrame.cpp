@@ -157,6 +157,13 @@ namespace PoseTracking
 		return mvpMapPoints;
 	}
 
+	void KeyFrame::AddConnection(KeyFrame* pKF, const int &weight)
+	{
 
+
+
+
+
+	}
 
 }

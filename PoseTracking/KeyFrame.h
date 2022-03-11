@@ -30,12 +30,70 @@ namespace PoseTracking
 		 * @param[in] Tcw 位姿
 		 */
 		void SetPose(const cv::Mat &Tcw);
-		cv::Mat GetPose();                  ///< 获取位姿
-		cv::Mat GetPoseInverse();           ///< 获取位姿的逆
-		cv::Mat GetCameraCenter();          ///< 获取(左目)相机的中心
-		cv::Mat GetStereoCenter();          ///< 获取双目相机的中心,这个只有在可视化的时候才会用到
-		cv::Mat GetRotation();              ///< 获取姿态
-		cv::Mat GetTranslation();           ///< 获取位置
+		cv::Mat GetPose();                  //< 获取位姿
+		cv::Mat GetPoseInverse();           //< 获取位姿的逆
+		cv::Mat GetCameraCenter();          //< 获取(左目)相机的中心
+		cv::Mat GetStereoCenter();          //< 获取双目相机的中心,这个只有在可视化的时候才会用到
+		cv::Mat GetRotation();              //< 获取姿态
+		cv::Mat GetTranslation();           //< 获取位置
+
+		// ====================== Covisibility graph functions ============================
+		/**
+		 * @brief 为关键帧之间添加连接
+		 * @details 更新了mConnectedKeyFrameWeights
+		 * @param pKF    关键帧
+		 * @param weight 权重，该关键帧与pKF共同观测到的3d点数量
+		 */
+		void AddConnection(KeyFrame* pKF, const int &weight);
+
+		/**
+		 * @brief 删除当前关键帧和指定关键帧之间的共视关系
+		 * @param[in] pKF 要删除的共视关系
+		 */
+		void EraseConnection(KeyFrame* pKF);
+
+		/** @brief 更新图的连接  */
+		void UpdateConnections();
+
+		/**
+		 * @brief 按照权重对连接的关键帧进行排序
+		 * @detials 更新后的变量存储在mvpOrderedConnectedKeyFrames和mvOrderedWeights中
+		 */
+		void UpdateBestCovisibles();
+
+		/**
+		 * @brief 得到与该关键帧连接的关键帧(没有排序的)
+		 * @return 连接的关键帧
+		 */
+		std::set<KeyFrame*> GetConnectedKeyFrames();
+
+		/**
+		 * @brief 得到与该关键帧连接的关键帧(已按权值排序)
+		 * @return 连接的关键帧
+		 */
+		std::vector<KeyFrame*> GetVectorCovisibleKeyFrames();
+
+		/**
+		 * @brief 得到与该关键帧连接的前N个关键帧(已按权值排序)
+		 * NOTICE 如果连接的关键帧少于N，则返回所有连接的关键帧,所以说返回的关键帧的数目其实不一定是N个
+		 * @param N 前N个
+		 * @return 连接的关键帧
+		 */
+		std::vector<KeyFrame*> GetBestCovisibilityKeyFrames(const int &N);
+
+		/**
+		 * @brief 得到与该关键帧连接的权重大于等于w的关键帧
+		 * @param w 权重
+		 * @return 连接的关键帧
+		 */
+		std::vector<KeyFrame*> GetCovisiblesByWeight(const int &w);
+
+		/**
+		 * @brief 得到该关键帧与pKF的权重
+		 * @param  pKF 关键帧
+		 * @return     权重
+		 */
+		int GetWeight(KeyFrame* pKF);
 
 		// ====================== MapPoint observation functions ==================================
 		/**
@@ -75,6 +133,9 @@ namespace PoseTracking
 		// mnFrameId记录了该KeyFrame是由哪个Frame初始化的
 		const long unsigned int mnFrameId;
 
+		//表示它已经是某帧的局部关键帧了，可以防止重复添加局部关键帧
+		long unsigned int mnTrackReferenceForFrame;        // 记录它
+
 		// 和Frame类中的定义相同
 		int mnGridCols;
 		int mnGridRows;
@@ -96,13 +157,13 @@ namespace PoseTracking
 		* @{
 		*/
 		// Scale pyramid info.
-		int mnScaleLevels;                  ///<图像金字塔的层数
-		float mfScaleFactor;                ///<图像金字塔的尺度因子
-		float mfLogScaleFactor;             ///<图像金字塔的尺度因子的对数值，用于仿照特征点尺度预测地图点的尺度
+		int mnScaleLevels;                  //<图像金字塔的层数
+		float mfScaleFactor;                //<图像金字塔的尺度因子
+		float mfLogScaleFactor;             //<图像金字塔的尺度因子的对数值，用于仿照特征点尺度预测地图点的尺度
 
-		std::vector<float> mvScaleFactors;		///<图像金字塔每一层的缩放因子
-		std::vector<float> mvLevelSigma2;		///@todo 目前在frame.c中没有用到，无法下定论
-		std::vector<float> mvInvLevelSigma2;	///<上面变量的倒数
+		std::vector<float> mvScaleFactors;		//<图像金字塔每一层的缩放因子
+		std::vector<float> mvLevelSigma2;		//@todo 目前在frame.c中没有用到，无法下定论
+		std::vector<float> mvInvLevelSigma2;	//<上面变量的倒数
 
 	private:
 		// SE3 Pose and camera center
