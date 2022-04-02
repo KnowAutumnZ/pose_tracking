@@ -104,6 +104,52 @@ namespace PoseTracking
 		Pos.copyTo(mWorldPos);
 	}
 
+	//世界坐标系下地图点被多个相机观测的平均观测方向
+	cv::Mat MapPoint::GetNormal()
+	{
+		std::unique_lock<std::mutex> lock(mMutexPos);
+		return mNormalVector.clone();
+	}
+
+	//获取地图点的参考关键帧
+	KeyFrame* MapPoint::GetReferenceKeyFrame()
+	{
+		std::unique_lock<std::mutex> lock(mMutexFeatures);
+		return mpRefKF;
+	}
+
+	// 能够观测到当前地图点的所有关键帧及该地图点在KF中的索引
+	std::map<KeyFrame*, size_t> MapPoint::GetObservations()
+	{
+		std::unique_lock<std::mutex> lock(mMutexFeatures);
+		return mObservations;
+	}
+
+	/**
+	 * @brief 检查该地图点是否在关键帧中（有对应的二维特征点）
+	 *
+	 * @param[in] pKF       关键帧
+	 * @return true         如果能够观测到，返回true
+	 * @return false        如果观测不到，返回false
+	 */
+	bool MapPoint::IsInKeyFrame(KeyFrame *pKF)
+	{
+		std::unique_lock<std::mutex> lock(mMutexFeatures);
+		// 存在返回true，不存在返回false
+		// std::map.count 用法见：http://www.cplusplus.com/reference/map/map/count/
+		return (mObservations.count(pKF));
+	}
+
+	//获取当前地图点在某个关键帧的观测中，对应的特征点的ID
+	int MapPoint::GetIndexInKeyFrame(KeyFrame *pKF)
+	{
+		std::unique_lock<std::mutex> lock(mMutexFeatures);
+		if (mObservations.count(pKF))
+			return mObservations[pKF];
+		else
+			return -1;
+	}
+
 	/**
 	 * @brief 给地图点添加观测
 	 *
@@ -226,6 +272,13 @@ namespace PoseTracking
 		}
 	}
 
+	// 获取当前地图点的描述子
+	cv::Mat MapPoint::GetDescriptor()
+	{
+		std::unique_lock<std::mutex> lock(mMutexFeatures);
+		return mDescriptor.clone();
+	}
+
 	/**
 	 * @brief 更新地图点的平均观测方向、观测距离范围
 	 *
@@ -281,6 +334,53 @@ namespace PoseTracking
 		}
 	}
 
+	float MapPoint::GetMinDistanceInvariance()
+	{
+		std::unique_lock<std::mutex> lock(mMutexPos);
+		return 0.8f*mfMinDistance;
+	}
+
+	float MapPoint::GetMaxDistanceInvariance()
+	{
+		std::unique_lock<std::mutex> lock(mMutexPos);
+		return 1.2f*mfMaxDistance;
+	}
+
+	/**
+	 * @brief Increase Visible
+	 *
+	 * Visible表示：
+	 * 1. 该MapPoint在某些帧的视野范围内，通过Frame::isInFrustum()函数判断
+	 * 2. 该MapPoint被这些帧观测到，但并不一定能和这些帧的特征点匹配上
+	 *    例如：有一个MapPoint（记为M），在某一帧F的视野范围内，
+	 *    但并不表明该点M可以和F这一帧的某个特征点能匹配上
+	 * TODO  所以说，found 就是表示匹配上了嘛？
+	 */
+	void MapPoint::IncreaseVisible(int n)
+	{
+		std::unique_lock<std::mutex> lock(mMutexFeatures);
+		mnVisible += n;
+	}
+
+	/**
+	 * @brief Increase Found
+	 *
+	 * 能找到该点的帧数+n，n默认为1
+	 * @see Tracking::TrackLocalMap()
+	 */
+	void MapPoint::IncreaseFound(int n)
+	{
+		std::unique_lock<std::mutex> lock(mMutexFeatures);
+		mnFound += n;
+	}
+
+	// 计算被找到的比例
+	float MapPoint::GetFoundRatio()
+	{
+		std::unique_lock<std::mutex> lock(mMutexFeatures);
+		return static_cast<float>(mnFound) / mnVisible;
+	}
+
 	// 没有经过 MapPointCulling 检测的MapPoints, 认为是坏掉的点
 	bool MapPoint::isBad()
 	{
@@ -289,4 +389,189 @@ namespace PoseTracking
 		return mbBad;
 	}
 
+	// 删除某个关键帧对当前地图点的观测
+	void MapPoint::EraseObservation(KeyFrame* pKF)
+	{
+		bool bBad = false;
+		{
+			std::unique_lock<std::mutex> lock(mMutexFeatures);
+			// 查找这个要删除的观测,根据单目和双目类型的不同从其中删除当前地图点的被观测次数
+			if (mObservations.count(pKF))
+			{
+				int idx = mObservations[pKF];
+
+				nObs--;
+				mObservations.erase(pKF);
+
+				// 如果该keyFrame是参考帧，该Frame被删除后重新指定RefFrame
+				if (mpRefKF == pKF)
+					mpRefKF = mObservations.begin()->first;
+
+				// If only 2 observations or less, discard point
+				// 当观测到该点的相机数目少于2时，丢弃该点
+				if (nObs <= 2)
+					bBad = true;
+			}
+		}
+
+		if (bBad)
+			// 告知可以观测到该MapPoint的Frame，该MapPoint已被删除
+			SetBadFlag();
+	}
+
+	/**
+	 * @brief 告知可以观测到该MapPoint的Frame，该MapPoint已被删除
+	 *
+	 */
+	void MapPoint::SetBadFlag()
+	{
+		std::map<KeyFrame*, size_t> obs;
+		{
+			std::unique_lock<std::mutex> lock1(mMutexFeatures);
+			std::unique_lock<std::mutex> lock2(mMutexPos);
+			mbBad = true;
+			// 把mObservations转存到obs，obs和mObservations里存的是指针，赋值过程为浅拷贝
+			obs = mObservations;
+			// 把mObservations指向的内存释放，obs作为局部变量之后自动删除
+			mObservations.clear();
+		}
+		for (std::map<KeyFrame*, size_t>::iterator mit = obs.begin(), mend = obs.end(); mit != mend; mit++)
+		{
+			KeyFrame* pKF = mit->first;
+			// 告诉可以观测到该MapPoint的KeyFrame，该MapPoint被删了
+			pKF->EraseMapPointMatch(mit->second);
+		}
+		// 擦除该MapPoint申请的内存
+		mpMap->EraseMapPoint(this);
+	}
+
+	// 下图中横线的大小表示不同图层图像上的一个像素表示的真实物理空间中的大小
+	//              ____
+	// Nearer      /____\     level:n-1 --> dmin
+	//            /______\                       d/dmin = 1.2^(n-1-m)
+	//           /________\   level:m   --> d
+	//          /__________\                     dmax/d = 1.2^m
+	// Farther /____________\ level:0   --> dmax
+	//
+	//           log(dmax/d)
+	// m = ceil(------------)
+	//            log(1.2)
+	// 这个函数的作用:
+	// 在进行投影匹配的时候会给定特征点的搜索范围,考虑到处于不同尺度(也就是距离相机远近,位于图像金字塔中不同图层)的特征点受到相机旋转的影响不同,
+	// 因此会希望距离相机近的点的搜索范围更大一点,距离相机更远的点的搜索范围更小一点,所以要在这里,根据点到关键帧/帧的距离来估计它在当前的关键帧/帧中,
+	// 会大概处于哪个尺度
+	/**
+	 * @brief 预测地图点对应特征点所在的图像金字塔尺度层数
+	 *
+	 * @param[in] currentDist   相机光心距离地图点距离
+	 * @param[in] pKF           关键帧
+	 * @return int              预测的金字塔尺度
+	 */
+	int MapPoint::PredictScale(const float &currentDist, KeyFrame* pKF)
+	{
+		float ratio;
+		{
+			std::unique_lock<std::mutex> lock(mMutexPos);
+			// mfMaxDistance = ref_dist*levelScaleFactor 为参考帧考虑上尺度后的距离
+			// ratio = mfMaxDistance/currentDist = ref_dist/cur_dist
+			ratio = mfMaxDistance / currentDist;
+		}
+
+		// 取对数
+		int nScale = std::ceil(log(ratio) / pKF->mfLogScaleFactor);
+		if (nScale < 0)
+			nScale = 0;
+		else if (nScale >= pKF->mnScaleLevels)
+			nScale = pKF->mnScaleLevels - 1;
+
+		return nScale;
+	}
+
+	/**
+	 * @brief 根据地图点到光心的距离来预测一个类似特征金字塔的尺度
+	 *
+	 * @param[in] currentDist       地图点到光心的距离
+	 * @param[in] pF                当前帧
+	 * @return int                  尺度
+	 */
+	int MapPoint::PredictScale(const float &currentDist, Frame* pF)
+	{
+		float ratio;
+		{
+			std::unique_lock<std::mutex> lock(mMutexPos);
+			ratio = mfMaxDistance / currentDist;
+		}
+
+		int nScale = std::ceil(log(ratio) / pF->mfLogScaleFactor);
+		if (nScale < 0)
+			nScale = 0;
+		else if (nScale >= pF->mnScaleLevels)
+			nScale = pF->mnScaleLevels - 1;
+
+		return nScale;
+	}
+
+	/**
+	 * @brief 替换地图点，更新观测关系
+	 *
+	 * @param[in] pMP       用该地图点来替换当前地图点
+	 */
+	void MapPoint::Replace(MapPoint* pMP)
+	{
+		// 同一个地图点则跳过
+		if (pMP->mnId == this->mnId)
+			return;
+
+		//要替换当前地图点,有两个工作:
+		// 1. 将当前地图点的观测数据等其他数据都"叠加"到新的地图点上
+		// 2. 将观测到当前地图点的关键帧的信息进行更新
+
+		// 清除当前地图点的信息，这一段和SetBadFlag函数相同
+		int nvisible, nfound;
+		std::map<KeyFrame*, size_t> obs;
+		{
+			std::unique_lock<std::mutex> lock1(mMutexFeatures);
+			std::unique_lock<std::mutex> lock2(mMutexPos);
+			obs = mObservations;
+			//清除当前地图点的原有观测
+			mObservations.clear();
+			//当前的地图点被删除了
+			mbBad = true;
+			//暂存当前地图点的可视次数和被找到的次数
+			nvisible = mnVisible;
+			nfound = mnFound;
+			//指明当前地图点已经被指定的地图点替换了
+			mpReplaced = pMP;
+		}
+
+		// 所有能观测到原地图点的关键帧都要复制到替换的地图点上
+		//- 将观测到当前地图的的关键帧的信息进行更新
+		for (std::map<KeyFrame*, size_t>::iterator mit = obs.begin(), mend = obs.end(); mit != mend; mit++)
+		{
+			KeyFrame* pKF = mit->first;
+			if (!pMP->IsInKeyFrame(pKF))
+			{
+				// 该关键帧中没有对"要替换本地图点的地图点"的观测
+				pKF->ReplaceMapPointMatch(mit->second, pMP);	// 让KeyFrame用pMP替换掉原来的MapPoint
+				pMP->AddObservation(pKF, mit->second);			// 让MapPoint替换掉对应的KeyFrame
+			}
+			else
+			{
+				// 这个关键帧对当前的地图点和"要替换本地图点的地图点"都具有观测
+				// 产生冲突，即pKF中有两个特征点a,b（这两个特征点的描述子是近似相同的），这两个特征点对应两个 MapPoint 为this,pMP
+				// 然而在fuse的过程中pMP的观测更多，需要替换this，因此保留b与pMP的联系，去掉a与this的联系
+				//说白了,既然是让对方的那个地图点来代替当前的地图点,就是说明对方更好,所以删除这个关键帧对当前帧的观测
+				pKF->EraseMapPointMatch(mit->second);
+			}
+		}
+
+		//- 将当前地图点的观测数据等其他数据都"叠加"到新的地图点上
+		pMP->IncreaseFound(nfound);
+		pMP->IncreaseVisible(nvisible);
+		//描述子更新
+		pMP->ComputeDistinctiveDescriptors();
+
+		//告知地图,删掉我
+		mpMap->EraseMapPoint(this);
+	}
 }

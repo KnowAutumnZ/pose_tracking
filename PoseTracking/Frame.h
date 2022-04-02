@@ -26,7 +26,7 @@ namespace PoseTracking
 	{
 	public:
 		Frame() {};
-		virtual ~Frame() {};
+		//virtual ~Frame() {};
 
 		// Copy constructor. 拷贝构造函数
 		/**
@@ -36,7 +36,7 @@ namespace PoseTracking
 		 * @param[in] frame 引用
 		 * @note 另外注意，调用这个函数的时候，这个函数中隐藏的this指针其实是指向目标帧的
 		 */
-		Frame(const Frame& frame);
+		Frame(const Frame* frame);
 
 		/**
 		 * @brief 为单目相机准备的帧构造函数
@@ -114,6 +114,23 @@ namespace PoseTracking
 		{
 			return mRwc.clone();
 		}
+
+		/**
+		 * @brief 判断路标点是否在视野中
+		 * 步骤
+		 * Step 1 获得这个地图点的世界坐标
+		 * Step 2 关卡一：检查这个地图点在当前帧的相机坐标系下，是否有正的深度.如果是负的，表示出错，返回false
+		 * Step 3 关卡二：将MapPoint投影到当前帧的像素坐标(u,v), 并判断是否在图像有效范围内
+		 * Step 4 关卡三：计算MapPoint到相机中心的距离, 并判断是否在尺度变化的距离内
+		 * Step 5 关卡四：计算当前视角和“法线”夹角的余弦值, 若小于设定阈值，返回false
+		 * Step 6 根据地图点到光心的距离来预测一个尺度（仿照特征点金字塔层级）
+		 * Step 7 记录计算得到的一些参数
+		 * @param[in] pMP                       当前地图点
+		 * @param[in] viewingCosLimit           夹角余弦，用于限制地图点和光心连线和法线的夹角
+		 * @return true                         地图点合格，且在视野内
+		 * @return false                        地图点不合格，抛弃
+		 */
+		bool isInFrustum(MapPoint* pMP, float viewingCosLimit);
 
 	public:
 		//帧的时间戳

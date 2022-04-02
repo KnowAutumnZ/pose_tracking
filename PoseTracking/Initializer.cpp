@@ -9,13 +9,10 @@ namespace PoseTracking
 	 * @param[in] sigma                 测量误差
 	 * @param[in] iterations            RANSAC迭代次数
 	 */
-	Initializer::Initializer(const cv::Mat& K, const Frame &ReferenceFrame, float sigma, int iterations)
+	Initializer::Initializer(const Frame* ReferenceFrame, float sigma, int iterations)
 	{
-		//从参考帧中获取相机的内参数矩阵
-		mK = K.clone();
-
 		// 从参考帧中获取去畸变后的特征点
-		mvKeys1 = ReferenceFrame.mvKeys;
+		mvKeys1 = ReferenceFrame->mvKeys;
 
 		//获取估计误差
 		mSigma = sigma;
@@ -43,11 +40,11 @@ namespace PoseTracking
 	 * @return true                     该帧可以成功初始化，返回true
 	 * @return false                    该帧不满足初始化条件，返回false
 	 */
-	bool Initializer::Initialize(const Frame &CurrentFrame, const std::vector<int> &vMatches12, cv::Mat &R21, cv::Mat &t21,
+	bool Initializer::Initialize(const Frame* CurrentFrame, const std::vector<int> &vMatches12, cv::Mat &R21, cv::Mat &t21,
 		std::vector<cv::Point3f> &vP3D, std::vector<bool> &vbTriangulated)
 	{
 		//获取当前帧的去畸变之后的特征点
-		mvKeys2 = CurrentFrame.mvKeys;
+		mvKeys2 = CurrentFrame->mvKeys;
 
 		// mvMatches12记录匹配上的特征点对，记录的是帧2在帧1的匹配索引
 		mvMatches12.clear();

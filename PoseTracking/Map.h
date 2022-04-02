@@ -23,12 +23,29 @@ namespace PoseTracking
 		 * @param[in] pKF 关键帧
 		 */
 		void AddKeyFrame(KeyFrame* pKF);
+
+		/**
+		 * @brief 从地图中删除关键帧
+		 * @detials 实际上这个函数中目前仅仅是删除了在std::set中保存的地图点的指针,并且删除后
+		 * 之前的地图点所占用的内存其实并没有得到释放
+		 * @param[in] pKF 关键帧
+		 */
+		void EraseKeyFrame(KeyFrame* pKF);
+
 		/**
 		 * @brief 向地图中添加地图点
 		 *
 		 * @param[in] pMP 地图点
 		 */
 		void AddMapPoint(MapPoint* pMP);
+
+		/**
+		 * @brief 从地图中擦除地图点
+		 *
+		 * @param[in] pMP 地图点
+		 */
+		void EraseMapPoint(MapPoint* pMP);
+
 		/**
 		 * @brief 获取地图中的所有地图点
 		 *
@@ -64,6 +81,7 @@ namespace PoseTracking
 		 * @return long unsigned int 个数
 		 */
 		long unsigned int MapPointsInMap();
+
 		/**
 		 * @brief 获取当前地图中的关键帧个数
 		 *
@@ -92,5 +110,8 @@ namespace PoseTracking
 
 		//类的成员函数在对类成员变量进行操作的时候,防止冲突的互斥量
 		std::mutex mMutexMap;
+
+		//当更新地图时的互斥量.回环检测中和局部BA后更新全局地图的时候会用到这个
+		std::mutex mMutexMapUpdate;
 	};
 }

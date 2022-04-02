@@ -10,8 +10,8 @@
 namespace PoseTracking
 {
 	class KeyFrame;
-	class Map;
 	class Frame;
+	class Map;
 
 	class MapPoint
 	{
@@ -25,6 +25,7 @@ namespace PoseTracking
 		 * @param[in] pMap      Map
 		 */
 		MapPoint(const cv::Mat &Pos, KeyFrame* pRefKF, Map* pMap);
+
 		/**
 		 * @brief 给定坐标与frame构造MapPoint
 		 * @detials 被双目：UpdateLastFrame()调用
@@ -41,6 +42,7 @@ namespace PoseTracking
 		 * @param[in] Pos 世界坐标系下地图点的位姿
 		 */
 		void SetWorldPos(const cv::Mat &Pos);
+
 		/**
 		 * @brief 获取当前地图点在世界坐标系下的位置
 		 * @return cv::Mat 位置
@@ -52,6 +54,7 @@ namespace PoseTracking
 		 * @return cv::Mat 一个向量
 		 */
 		cv::Mat GetNormal();
+
 		/**
 		 * @brief 获取生成当前地图点的参考关键帧
 		 * @return KeyFrame*
@@ -78,6 +81,7 @@ namespace PoseTracking
 		 * @param[in] idx MapPoint在KeyFrame中的索引
 		 */
 		void AddObservation(KeyFrame* pKF, size_t idx);
+
 		/**
 		 * @brief 取消某个关键帧对当前地图点的观测
 		 * @detials 如果某个关键帧要被删除，那么会发生这个操作
@@ -91,6 +95,7 @@ namespace PoseTracking
 		 * @param[in] pKF   关键帧
 		 * @return int      索引
 		 */
+
 		int GetIndexInKeyFrame(KeyFrame* pKF);
 		/**
 		 * @brief 查看某个关键帧是否看到了当前的地图点
@@ -106,6 +111,7 @@ namespace PoseTracking
 		 *
 		 */
 		void SetBadFlag();
+
 		/**
 		 * @brief 判断当前地图点是否是bad
 		 *
@@ -121,6 +127,7 @@ namespace PoseTracking
 		 * @param[in] pMP 地图点
 		 */
 		void Replace(MapPoint* pMP);
+
 		/**
 		 * @brief 获取取代当前地图点的点? //?
 		 *
@@ -138,6 +145,7 @@ namespace PoseTracking
 		 * @param[in] n 要增加的次数
 		 */
 		void IncreaseVisible(int n = 1);
+
 		/**
 		 * @brief Increase Found
 		 * @detials 能找到该点的帧数+n，n默认为1
@@ -145,8 +153,10 @@ namespace PoseTracking
 		 * @see Tracking::TrackLocalMap()
 		 */
 		void IncreaseFound(int n = 1);
+
 		//? 这个比例是?
 		float GetFoundRatio();
+
 		/**
 		 * @brief 获取被找到的次数
 		 *

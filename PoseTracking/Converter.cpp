@@ -40,4 +40,53 @@ namespace PoseTracking
 		//返回计算结果，还是用深拷贝函数
 		return cvMat.clone();
 	}
+
+	//Eigen::Matrix3d -> cv::Mat 
+	cv::Mat Converter::toCvMat(const Eigen::Matrix3d &m)
+	{
+		//首先定义存储计算结果的变量
+		cv::Mat cvMat(3, 3, CV_32F);
+		//然后逐个元素进行赋值
+		for (int i = 0; i < 3; i++)
+			for (int j = 0; j < 3; j++)
+				cvMat.at<float>(i, j) = m(i, j);
+
+		//返回深拷贝形式的转换结果
+		return cvMat.clone();
+	}
+
+	//Eigen::Matrix<double,3,1> -> cv::Mat
+	cv::Mat Converter::toCvMat(const Eigen::Matrix<double, 3, 1> &m)
+	{
+		//首先定义保存转换结果的变量
+		cv::Mat cvMat(3, 1, CV_32F);
+		//还是老办法，挨个赋值
+		for (int i = 0; i < 3; i++)
+			cvMat.at<float>(i) = m(i);
+
+		//返回转换结果
+		return cvMat.clone();
+	}
+
+	// 将OpenCV中Mat类型的向量转化为Eigen中Matrix类型的变量
+	Eigen::Matrix<double, 3, 1> Converter::toVector3d(const cv::Mat &cvVector)
+	{
+		//首先生成用于存储转换结果的向量
+		Eigen::Matrix<double, 3, 1> v;
+		//然后通过逐个赋值的方法完成转换
+		v << cvVector.at<float>(0), cvVector.at<float>(1), cvVector.at<float>(2);
+		//返回转换结果
+		return v;
+	}
+
+	//cv::Point3f -> Eigen::Matrix<double,3,1>
+	Eigen::Matrix<double, 3, 1> Converter::toVector3d(const cv::Point3f &cvPoint)
+	{
+		//声明存储转换结果用的变量
+		Eigen::Matrix<double, 3, 1> v;
+		//直接赋值的方法
+		v << cvPoint.x, cvPoint.y, cvPoint.z;
+		//返回转换结果
+		return v;
+	}
 }

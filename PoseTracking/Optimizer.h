@@ -14,6 +14,7 @@
 #include "g2o/solvers/linear_solver_dense.h"
 #include "g2o/core/optimization_algorithm_levenberg.h"
 #include "g2o/core/robust_kernel_impl.h"
+#include "g2o/solvers/linear_solver_eigen.h"
 
 namespace PoseTracking
 {
@@ -42,8 +43,30 @@ namespace PoseTracking
 		 * @param   pFrame Frame
 		 * @return  inliers数量
 		 */
-		int static PoseOptimization(Tracking* pTrack, Frame* pFrame);
+		int static PoseOptimization(Frame* pFrame);
 
-
+		/**
+		 * @brief Local Bundle Adjustment
+		 *
+		 * 1. Vertex:
+		 *     - g2o::VertexSE3Expmap()，LocalKeyFrames，即当前关键帧的位姿、与当前关键帧相连的关键帧的位姿
+		 *     - g2o::VertexSE3Expmap()，FixedCameras，即能观测到LocalMapPoints的关键帧（并且不属于LocalKeyFrames）的位姿，在优化中这些关键帧的位姿不变
+		 *     - g2o::VertexSBAPointXYZ()，LocalMapPoints，即LocalKeyFrames能观测到的所有MapPoints的位置
+		 * 2. Edge:
+		 *     - g2o::EdgeSE3ProjectXYZ()，BaseBinaryEdge
+		 *         + Vertex：关键帧的Tcw，MapPoint的Pw
+		 *         + measurement：MapPoint在关键帧中的二维位置(u,v)
+		 *         + InfoMatrix: invSigma2(与特征点所在的尺度有关)
+		 *     - g2o::EdgeStereoSE3ProjectXYZ()，BaseBinaryEdge
+		 *         + Vertex：关键帧的Tcw，MapPoint的Pw
+		 *         + measurement：MapPoint在关键帧中的二维位置(ul,v,ur)
+		 *         + InfoMatrix: invSigma2(与特征点所在的尺度有关)
+		 *
+		 * @param pKF        KeyFrame
+		 * @param pbStopFlag 是否停止优化的标志
+		 * @param pMap       在优化后，更新状态时需要用到Map的互斥量mMutexMapUpdate
+		 * @note 由局部建图线程调用,对局部地图进行优化的函数
+		 */
+		void static LocalBundleAdjustment(KeyFrame* pKF, bool *pbStopFlag, Map *pMap);
 	};
 }

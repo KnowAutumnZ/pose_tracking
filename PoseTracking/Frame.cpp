@@ -5,17 +5,17 @@ namespace PoseTracking
 	//下一个生成的帧的ID,这里是初始化类的静态成员变量
 	long unsigned int Frame::nNextId = 0;
 
-	Frame::Frame(const Frame& frame):mbInitialComputations(frame.mbInitialComputations), mnMinX(frame.mnMinX), mnMinY(frame.mnMinY), mnMaxX(frame.mnMaxX), 
-		mnMaxY(frame.mnMaxY),mfGridElementWidthInv(frame.mfGridElementWidthInv), mfGridElementHeightInv(frame.mfGridElementHeightInv), mnId(frame.mnId),
-		mvpMapPoints(frame.mvpMapPoints), mvKeys(frame.mvKeys), mDescriptors(frame.mDescriptors.clone()), mvbOutlier(frame.mvbOutlier),
-		mpReferenceKF(frame.mpReferenceKF), mnScaleLevels(frame.mnScaleLevels), mfScaleFactor(frame.mfScaleFactor), mfLogScaleFactor(frame.mfLogScaleFactor),
-		mvScaleFactors(frame.mvScaleFactors), mvInvScaleFactors(frame.mvInvScaleFactors), mvLevelSigma2(frame.mvLevelSigma2), mvInvLevelSigma2(frame.mvInvLevelSigma2)
+	Frame::Frame(const Frame* frame):mbInitialComputations(frame->mbInitialComputations), mnMinX(frame->mnMinX), mnMinY(frame->mnMinY), mnMaxX(frame->mnMaxX),
+		mnMaxY(frame->mnMaxY),mfGridElementWidthInv(frame->mfGridElementWidthInv), mfGridElementHeightInv(frame->mfGridElementHeightInv), mnId(frame->mnId),
+		mvpMapPoints(frame->mvpMapPoints), mvKeys(frame->mvKeys), mDescriptors(frame->mDescriptors.clone()), mvbOutlier(frame->mvbOutlier),
+		mpReferenceKF(frame->mpReferenceKF), mnScaleLevels(frame->mnScaleLevels), mfScaleFactor(frame->mfScaleFactor), mfLogScaleFactor(frame->mfLogScaleFactor),
+		mvScaleFactors(frame->mvScaleFactors), mvInvScaleFactors(frame->mvInvScaleFactors), mvLevelSigma2(frame->mvLevelSigma2), mvInvLevelSigma2(frame->mvInvLevelSigma2)
 	{
-		mTimeStamp = frame.mTimeStamp;
+		mTimeStamp = frame->mTimeStamp;
 
 		//新的帧设置Pose的初始值，便于后续优化
-		if (!frame.mTcw.empty())
-			SetPose(frame.mTcw);
+		if (!frame->mTcw.empty())
+			SetPose(frame->mTcw);
 
 		//逐个复制，其实这里也是深拷贝
 		//这里没有使用前面的深拷贝方式的原因可能是mGrid是由若干vector类型对象组成的vector，
@@ -23,7 +23,7 @@ namespace PoseTracking
 		//错误使用不合适的复制函数，导致第一维度的vector不能够被正确地“拷贝”
 		for (int i = 0; i < FRAME_GRID_COLS; i++)
 			for (int j = 0; j < FRAME_GRID_ROWS; j++)
-				mGrid[i][j] = frame.mGrid[i][j];
+				mGrid[i][j] = frame->mGrid[i][j];
 	}
 
 	Frame::Frame(const cv::Mat &imGray, const double &timeStamp, orbDetector* extractor, const cv::Mat &K, const cv::Mat &Distort):mTimeStamp(timeStamp)
@@ -262,6 +262,98 @@ namespace PoseTracking
 			return false;
 
 		// 计算成功返回true
+		return true;
+	}
+
+	/**
+	 * @brief 判断地图点是否在视野中
+	 * 步骤
+	 * Step 1 获得这个地图点的世界坐标，经过以下层层关卡的判断，通过的地图点才认为是在视野中
+	 * Step 2 关卡一：将这个地图点变换到当前帧的相机坐标系下，如果深度值为正才能继续下一步。
+	 * Step 3 关卡二：将地图点投影到当前帧的像素坐标，如果在图像有效范围内才能继续下一步。
+	 * Step 4 关卡三：计算地图点到相机中心的距离，如果在有效距离范围内才能继续下一步。
+	 * Step 5 关卡四：计算当前相机指向地图点向量和地图点的平均观测方向夹角，小于60°才能进入下一步。
+	 * Step 6 根据地图点到光心的距离来预测一个尺度（仿照特征点金字塔层级）
+	 * Step 7 记录计算得到的一些参数
+	 * @param[in] pMP                       当前地图点
+	 * @param[in] viewingCosLimit           当前相机指向地图点向量和地图点的平均观测方向夹角余弦阈值
+	 * @return true                         地图点合格，且在视野内
+	 * @return false                        地图点不合格，抛弃
+	 */
+	bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
+	{
+		// 这个标志的确定要经过多个函数的确定，isInFrustum()只是其中的一个验证关卡。这里默认设置为否
+		pMP->mbTrackInView = false;
+
+		// Step 1 获得这个地图点的世界坐标
+		cv::Mat P = pMP->GetWorldPos();
+
+		// 根据当前帧(粗糙)位姿转化到当前相机坐标系下的三维点Pc
+		const cv::Mat Pc = mRcw * P + mtcw;
+		const float &PcX = Pc.at<float>(0);
+		const float &PcY = Pc.at<float>(1);
+		const float &PcZ = Pc.at<float>(2);
+
+		// Step 2 关卡一：将这个地图点变换到当前帧的相机坐标系下，如果深度值为正才能继续下一步。
+		if (PcZ < 0.0f)
+			return false;
+
+		// Step 3 关卡二：将地图点投影到当前帧的像素坐标，如果在图像有效范围内才能继续下一步。
+		const float invz = 1.0f / PcZ;
+		const float u = mK.at<double>(0, 0) * PcX*invz + mK.at<double>(0, 2);
+		const float v = mK.at<double>(1, 1) * PcY*invz + mK.at<double>(1, 2);
+
+		// 判断是否在图像边界中，只要不在那么就说明无法在当前帧下进行重投影
+		if (u<mnMinX || u>mnMaxX)
+			return false;
+		if (v<mnMinY || v>mnMaxY)
+			return false;
+
+		// Step 4 关卡三：计算地图点到相机中心的距离，如果在有效距离范围内才能继续下一步。
+		// 得到认为的可靠距离范围:[0.8f*mfMinDistance, 1.2f*mfMaxDistance]
+		const float maxDistance = pMP->GetMaxDistanceInvariance();
+		const float minDistance = pMP->GetMinDistanceInvariance();
+
+		// 得到当前地图点距离当前帧相机光心的距离,注意P，mOw都是在同一坐标系下才可以
+		// mOw：当前相机光心在世界坐标系下坐标
+		const cv::Mat PO = P - mOw;
+		//取模就得到了距离
+		const float dist = cv::norm(PO);
+
+		//如果不在有效范围内，认为投影不可靠
+		if (dist<minDistance || dist>maxDistance)
+			return false;
+
+		// Step 5 关卡四：计算当前相机指向地图点向量和地图点的平均观测方向夹角，小于60°才能进入下一步。
+		cv::Mat Pn = pMP->GetNormal();
+
+		// 计算当前相机指向地图点向量和地图点的平均观测方向夹角的余弦值，注意平均观测方向为单位向量
+		const float viewCos = PO.dot(Pn) / dist;
+
+		//夹角要在60°范围内，否则认为观测方向太偏了，重投影不可靠，返回false
+		if (viewCos < viewingCosLimit)
+			return false;
+
+		// Step 6 根据地图点到光心的距离来预测一个尺度（仿照特征点金字塔层级）
+		const int nPredictedLevel = pMP->PredictScale(dist, this);	
+
+		// Step 7 记录计算得到的一些参数
+		// 通过置位标记 MapPoint::mbTrackInView 来表示这个地图点要被投影 
+		pMP->mbTrackInView = true;
+
+		// 该地图点投影在当前图像（一般是左图）的像素横坐标
+		pMP->mTrackProjX = u;
+
+		// 该地图点投影在当前图像（一般是左图）的像素纵坐标									
+		pMP->mTrackProjY = v;
+
+		// 根据地图点到光心距离，预测的该地图点的尺度层级
+		pMP->mnTrackScaleLevel = nPredictedLevel;
+
+		// 保存当前相机指向地图点向量和地图点的平均观测方向夹角的余弦值
+		pMP->mTrackViewCos = viewCos;
+
+		//执行到这里说明这个地图点在相机的视野中并且进行重投影是可靠的，返回true
 		return true;
 	}
 }

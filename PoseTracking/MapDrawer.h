@@ -11,6 +11,8 @@
 
 namespace PoseTracking
 {
+	class Map;
+
 	class MapDrawer
 	{
 	public:

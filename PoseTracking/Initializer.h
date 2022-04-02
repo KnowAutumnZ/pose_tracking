@@ -19,9 +19,7 @@ namespace PoseTracking
 		 * @param[in] sigma                 测量误差
 		 * @param[in] iterations            RANSAC迭代次数
 		 */
-		Initializer(const cv::Mat& K, const Frame &ReferenceFrame,
-			float sigma = 1.0,
-			int iterations = 10);
+		Initializer(const Frame* ReferenceFrame, float sigma = 1.0, int iterations = 10);
 
 		/**
 		 * @brief 计算基础矩阵和单应性矩阵，选取最佳的来恢复出最开始两帧之间的相对姿态，并进行三角化得到初始地图点
@@ -41,7 +39,7 @@ namespace PoseTracking
 		 * @return true                     该帧可以成功初始化，返回true
 		 * @return false                    该帧不满足初始化条件，返回false
 		 */
-		bool Initialize(const Frame &CurrentFrame,
+		bool Initialize(const Frame* CurrentFrame,
 			const std::vector<int> &vMatches12,
 			cv::Mat &R21, cv::Mat &t21,
 			std::vector<cv::Point3f> &vP3D,
@@ -246,9 +244,6 @@ namespace PoseTracking
 			return int(((double)rand() / ((double)RAND_MAX + 1.0)) * d) + min;
 		}
 	private:
-		/** 相机内参 */
-		cv::Mat mK;
-
 		/** 测量误差 */
 		float mSigma, mSigma2;
 

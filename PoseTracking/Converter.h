@@ -40,5 +40,38 @@ namespace PoseTracking
 		 * @remark
 		 */
 		static cv::Mat toCvMat(const Eigen::Matrix<double, 4, 4> &m);
+
+		/**
+		 * @brief 将一个3x1的Eigen行向量转换成为cv::Mat格式
+		 *
+		 * @param[in] m 3x1的Eigen行向量
+		 * @return cv::Mat 转换结果
+		 */
+		static cv::Mat toCvMat(const Eigen::Matrix3d &m);
+
+		/**
+		 * @brief 将一个3x1的Eigen行向量转换成为cv::Mat格式
+		 *
+		 * @param[in] m 3x1的Eigen行向量
+		 * @return cv::Mat 转换结果
+		 */
+		static cv::Mat toCvMat(const Eigen::Matrix<double, 3, 1> &m);
+
+		/**
+		 * @brief 将cv::Point3f转换成为Eigen中3x1的矩阵
+		 *
+		 * @param[in] cvPoint 输入的cv表示的三维点坐标
+		 * @return Eigen::Matrix<double,3,1> 以Eigen中3x1向量表示的三维点坐标
+		 */
+		static Eigen::Matrix<double, 3, 1> toVector3d(const cv::Point3f &cvPoint);
+
+		/**
+		 * @brief 将cv::Mat类型数据转换成为3x1的Eigen矩阵
+		 *
+		 * @param[in] cvVector 待转换的数据
+		 * @return Eigen::Matrix<double,3,1> 转换结果
+		 * @note 需要确保输入的数据大小尺寸正确。
+		 */
+		static Eigen::Matrix<double, 3, 1> toVector3d(const cv::Mat &cvVector);
 	};
 }

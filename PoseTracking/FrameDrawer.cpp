@@ -183,7 +183,7 @@ namespace PoseTracking
 		//拷贝跟踪线程的图像
 		pTracker->mIm.copyTo(mIm);
 		//拷贝跟踪线程的特征点
-		mvCurrentKeys = pTracker->mCurrentFrame.mvKeys;
+		mvCurrentKeys = pTracker->mpCurrentFrame->mvKeys;
 		N = mvCurrentKeys.size();
 		mvbVO = std::vector<bool>(N, false);
 		mvbMap = std::vector<bool>(N, false);
@@ -194,7 +194,7 @@ namespace PoseTracking
 		if (pTracker->mLastProcessedState == Tracking::NOT_INITIALIZED)
 		{
 			//那么就要获取初始化帧的特征点和匹配信息
-			mvIniKeys = pTracker->mInitialFrame.mvKeys;
+			mvIniKeys = pTracker->mpInitialFrame->mvKeys;
 			mvIniMatches = pTracker->mvIniMatches;
 		}
 		//如果上一帧是在正常跟踪
@@ -203,10 +203,10 @@ namespace PoseTracking
 			//获取当前帧地图点的信息
 			for (int i = 0; i < N; i++)
 			{
-				MapPoint* pMP = pTracker->mCurrentFrame.mvpMapPoints[i];
+				MapPoint* pMP = pTracker->mpCurrentFrame->mvpMapPoints[i];
 				if (pMP)
 				{
-					if (!pTracker->mCurrentFrame.mvbOutlier[i])
+					if (!pTracker->mpCurrentFrame->mvbOutlier[i])
 					{
 						//该mappoints可以被多帧观测到，则为有效的地图点
 						if (pMP->Observations() > 0)

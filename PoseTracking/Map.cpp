@@ -20,6 +20,16 @@ namespace PoseTracking
 			mnMaxKFid = pKF->mnId;
 	}
 
+	/**
+	 * @brief Erase KeyFrame from the map
+	 * @param pKF KeyFrame
+	 */
+	void Map::EraseKeyFrame(KeyFrame *pKF)
+	{
+		std::unique_lock<std::mutex> lock(mMutexMap);
+		mspKeyFrames.erase(pKF);
+	}
+
 	/*
 	 * @brief Insert MapPoint in the map
 	 * @param pMP MapPoint
@@ -68,6 +78,22 @@ namespace PoseTracking
 	{
 		std::unique_lock<std::mutex> lock(mMutexMap);
 		return mspMapPoints.size();
+	}
+
+	/**
+	 * @brief 从地图中删除地图点,但是其实这个地图点所占用的内存空间并没有被释放
+	 *
+	 * @param[in] pMP
+	 */
+	void Map::EraseMapPoint(MapPoint *pMP)
+	{
+		std::unique_lock<std::mutex> lock(mMutexMap);
+		mspMapPoints.erase(pMP);
+
+		//下面是作者加入的注释. 实际上只是从std::set中删除了地图点的指针, 原先地图点
+		//占用的内存区域并没有得到释放
+		// TODO: This only erase the pointer.
+		// Delete the MapPoint
 	}
 
 	//获取地图中的关键帧数目

@@ -17,15 +17,24 @@
 #include "Viewer.h"
 #include "system.h"
 #include "Optimizer.h"
+#include "LocalMapping.h"
 
 namespace PoseTracking
 {
+	//内参、畸变
+	static cv::Mat mK, mDistort;
+	static float fx, fy, cx, cy;
+
+	//系统所使用的传感器类型
 	enum eSensor;
 
 	//在System类中用到了Tracking，Tracking类中又用到了System，必须添加这样的前置
 	class System;
 	class Viewer;
+	class Map;
 	class FrameDrawer;
+	class LocalMapping;
+	class Initializer;
 
 	class Tracking
 	{
@@ -56,6 +65,21 @@ namespace PoseTracking
 		/** @brief 主追踪进程 */
 		void Track();
 
+		/**
+		 * @brief 设置局部地图句柄
+		 *
+		 * @param[in] pLocalMapper 局部建图器
+		 */
+		void SetLocalMapper(LocalMapping* pLocalMapper);
+
+		/**
+		 * @brief 设置可视化查看器句柄
+		 *
+		 * @param[in] pViewer 可视化查看器
+		 */
+		void SetViewer(Viewer* pViewer);
+
+	public:
 		/** @brief 单目输入的时候所进行的初始化操作 */
 		void MonocularInitialization();
 
@@ -136,6 +160,17 @@ namespace PoseTracking
 		 */
 		void SearchLocalPoints();
 
+		/**
+		 * @brief 断当前帧是否为关键帧
+		 * @return true if needed
+		 */
+		bool NeedNewKeyFrame();
+		/**
+		 * @brief 创建新的关键帧
+		 *
+		 * 对于非单目的情况，同时创建新的MapPoints
+		 */
+		void CreateNewKeyFrame();
 	public:
 		//跟踪状态类型
 		enum eTrackingState {
@@ -154,9 +189,6 @@ namespace PoseTracking
 
 		//传感器类型
 		eSensor mSensor;
-
-		//内参、畸变
-		cv::Mat mK, mDistort;
 
 		//图像
 		cv::Mat mIm;
@@ -206,24 +238,43 @@ namespace PoseTracking
 		MapDrawer* mpMapDrawer;
 
 		//初始化过程中的参考帧
-		Frame mInitialFrame;
+		Frame* mpInitialFrame;
 		//追踪线程中有一个当前帧
-		Frame mCurrentFrame;
+		Frame* mpCurrentFrame;
+		// 上一帧
+		Frame* mpLastFrame;
+
+		//单目初始器
+		Initializer* mpInitializer{nullptr};
 
 		// 上一关键帧
 		KeyFrame* mpLastKeyFrame;
-		// 上一帧
-		Frame mLastFrame;
+
 		// 上一个关键帧的ID
 		unsigned int mnLastKeyFrameId;
 		// 上一次重定位的那一帧的ID
 		unsigned int mnLastRelocFrameId;
 
-		//单目初始器
-		Initializer* mpInitializer{nullptr};
-
 		//Local Map 局部地图相关
 		//参考关键帧
 		KeyFrame* mpReferenceKF;// 当前关键帧就是参考帧
+
+	public:
+		//当前帧中的进行匹配的内点,将会被不同的函数反复使用
+		int mnMatchesInliers;
+
+		// 新建关键帧和重定位中用来判断最小最大时间间隔，和帧率有关
+		int mMinFrames;
+		int mMaxFrames;
+
+		//参考关键帧
+		std::list<KeyFrame*> mlpReferences;
+		//所有帧的时间戳
+		std::list<double> mlFrameTimes;
+		//是否跟丢的标志
+		std::list<bool> mlbLost;
+
+		//局部建图器句柄
+		LocalMapping* mpLocalMapper;
 	};
 }

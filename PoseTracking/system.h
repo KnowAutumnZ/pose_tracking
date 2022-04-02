@@ -17,8 +17,10 @@ namespace PoseTracking
 	//要用到的其他类的前视声明
 	class Viewer;
 	class FrameDrawer;
+	class MapDrawer;
 	class Map;
 	class Tracking;
+	class LocalMapping;
 
 	class System
 	{
@@ -32,10 +34,8 @@ namespace PoseTracking
 	private:
 		// 传感器类型
 		eSensor mSensor;
-
 		//指向地图（数据库）的指针
 		Map* mpMap;
-
 		// 查看器，可视化 界面
 		Viewer* mpViewer;
 
@@ -43,10 +43,14 @@ namespace PoseTracking
 		FrameDrawer* mpFrameDrawer;
 		//地图绘制器
 		MapDrawer* mpMapDrawer;
-
-		// 追踪器，除了进行运动追踪外还要负责创建关键帧、创建新地图点和进行重定位的工作。详细信息还得看相关文件
+		//追踪器，除了进行运动追踪外还要负责创建关键帧、创建新地图点和进行重定位的工作。详细信息还得看相关文件
 		Tracking* mpTracker;
+		//局部地图
+		LocalMapping* mpLocalMapper;
 
+		//系统除了在主进程中进行运动追踪工作外，会创建局部建图线程、回环检测线程和查看器线程。
+		std::thread* mptLocalMapping;
+		std::thread* mptLoopClosing;
 		std::thread* mptViewer;
 	};
 }
